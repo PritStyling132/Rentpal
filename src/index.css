@@ -1,0 +1,94 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
+All colors MUST be HSL.
+*/
+
+@layer base {
+  :root {
+    /* New Color Palette - Modern Dark Red Theme */
+    --background: 12 15% 96%;
+    --foreground: 0 10% 4%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 0 10% 4%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 10% 4%;
+
+    --primary: 359 77% 56%;
+    --primary-foreground: 12 15% 96%;
+
+    --secondary: 0 0% 83%;
+    --secondary-foreground: 200 15% 10%;
+
+    --muted: 6 5% 67%;
+    --muted-foreground: 200 15% 10%;
+
+    --accent: 359 74% 41%;
+    --accent-foreground: 12 15% 96%;
+
+    --destructive: 359 88% 21%;
+    --destructive-foreground: 12 15% 96%;
+
+    --border: 0 0% 83%;
+    --input: 0 0% 83%;
+    --ring: 359 77% 56%;
+
+    --radius: 0.5rem;
+    
+    /* Premium shadows with red accent */
+    --shadow-luxury: 0 25px 50px -12px hsl(359 77% 56% / 0.25), 0 10px 20px -5px hsl(359 74% 41% / 0.15);
+    --shadow-card: 0 8px 30px -4px hsl(359 77% 56% / 0.12);
+    --shadow-elegant: 0 15px 40px -10px hsl(359 77% 56% / 0.18);
+    --shadow-soft: 0 2px 15px hsl(6 5% 67% / 0.10);
+    --shadow-premium: 0 20px 60px -10px hsl(359 77% 56% / 0.25), 0 0 0 1px hsl(359 74% 41% / 0.10);
+    
+    /* Refined transitions with premium easing */
+    --transition-smooth: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-elegant: all 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    --transition-bounce: all 0.6s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+  }
+
+  .dark {
+    --background: 200 15% 10%;
+    --foreground: 12 15% 96%;
+
+    --card: 0 10% 4%;
+    --card-foreground: 12 15% 96%;
+
+    --popover: 0 10% 4%;
+    --popover-foreground: 12 15% 96%;
+
+    --primary: 359 77% 56%;
+    --primary-foreground: 0 10% 4%;
+
+    --secondary: 200 15% 10%;
+    --secondary-foreground: 12 15% 96%;
+
+    --muted: 6 5% 67%;
+    --muted-foreground: 12 15% 96%;
+
+    --accent: 359 74% 41%;
+    --accent-foreground: 12 15% 96%;
+
+    --destructive: 359 88% 21%;
+    --destructive-foreground: 12 15% 96%;
+
+    --border: 200 15% 10%;
+    --input: 200 15% 10%;
+    --ring: 359 77% 56%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+}

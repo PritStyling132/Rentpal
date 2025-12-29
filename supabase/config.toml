@@ -1,0 +1,10 @@
+project_id = "rodhcrqwunhzgxcopcqk"
+
+[functions.create-razorpay-order]
+verify_jwt = true
+
+[functions.sync-to-sheets]
+verify_jwt = true
+
+[functions.delete-old-blogs]
+verify_jwt = false

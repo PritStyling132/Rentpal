@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test RLS - Message Fetching</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+    <h1>Test Message Fetching with RLS</h1>
+    <div>
+        <label>Email: <input type="email" id="email" value=""></label><br>
+        <label>Password: <input type="password" id="password" value=""></label><br>
+        <button onclick="login()">Login</button>
+        <button onclick="fetchMessages()">Fetch Messages</button>
+    </div>
+    <div id="output"></div>
+
+    <script>
+        const supabase = supabase.createClient(
+            'https://ybbyuvdughhadyuisixp.supabase.co',
+            'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InliYnl1dmR1Z2hoYWR5dWlzaXhwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjUzNjAwNzUsImV4cCI6MjA4MDkzNjA3NX0.XdTWijmCZXCQ0IY_G13Eh9zFmvW1z5ZLnvDNApxeuko'
+        );
+
+        async function login() {
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+
+            const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+
+            if (error) {
+                document.getElementById('output').innerHTML = `<p style="color:red">Login Error: ${error.message}</p>`;
+            } else {
+                document.getElementById('output').innerHTML = `<p style="color:green">✅ Logged in as: ${data.user.email}<br>User ID: ${data.user.id}</p>`;
+            }
+        }
+
+        async function fetchMessages() {
+            const conversationId = 'aa4b9d16-6c55-4d48-b23f-ce84d6b9379b';
+
+            console.log('Fetching messages for conversation:', conversationId);
+
+            const { data: messages, error } = await supabase
+                .from('messages')
+                .select('*')
+                .eq('conversation_id', conversationId)
+                .is('deleted_at', null)
+                .order('created_at', { ascending: true });
+
+            if (error) {
+                document.getElementById('output').innerHTML = `<p style="color:red">❌ Error: ${error.message}<br>${JSON.stringify(error)}</p>`;
+                console.error('Fetch error:', error);
+            } else {
+                document.getElementById('output').innerHTML = `
+                    <p style="color:green">✅ Fetched ${messages.length} messages</p>
+                    <pre>${JSON.stringify(messages, null, 2)}</pre>
+                `;
+                console.log('Messages:', messages);
+            }
+        }
+    </script>
+</body>
+</html>
