@@ -7,16 +7,21 @@ import { Card } from '@/components/ui/card';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
-import { 
-  Send, 
-  Phone, 
-  X, 
-  Check, 
+import {
+  Send,
+  Phone,
+  X,
+  Check,
   CheckCheck,
   Loader2,
-  MessageCircle,
   Trash2,
-  MoreVertical
+  MoreVertical,
+  Smile,
+  Image as ImageIcon,
+  Mic,
+  Square,
+  Play,
+  Pause
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -24,8 +29,14 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
 import { formatDistanceToNow, format, isToday, isYesterday } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
+import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
 
 interface ChatWindowProps {
   conversationId: string;
@@ -51,10 +62,11 @@ export const ChatWindow = ({
   ownerPhone
 }: ChatWindowProps) => {
   const { user } = useAuth();
-  const { 
-    messages, 
-    sendMessage, 
-    sendTyping, 
+  const {
+    messages,
+    sendMessage,
+    uploadMedia,
+    sendTyping,
     sendStopTyping,
     typingUsers,
     onlineUsers,
@@ -64,13 +76,28 @@ export const ChatWindow = ({
     joinConversation,
     deleteMessage
   } = useChat();
-  
+
   const [inputValue, setInputValue] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingTime, setRecordingTime] = useState(0);
+  const [isUploading, setIsUploading] = useState(false);
+  const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const audioElementsRef = useRef<Map<string, HTMLAudioElement>>(new Map());
+
   const conversationMessages = messages[conversationId] || [];
   const isTypingActive = typingUsers[conversationId]?.size > 0;
+
+  // Debug: Log when messages change
+  console.log('ChatWindow render - conversationId:', conversationId, 'messages count:', conversationMessages.length);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -114,6 +141,128 @@ export const ChatWindow = ({
   const handleApprove = () => {
     if (ownerPhone) {
       approveContactRequest(conversationId, ownerPhone);
+    }
+  };
+
+  // Emoji picker handler
+  const handleEmojiClick = (emojiData: EmojiClickData) => {
+    setInputValue(prev => prev + emojiData.emoji);
+    setShowEmojiPicker(false);
+    inputRef.current?.focus();
+  };
+
+  // Image upload handler
+  const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      return;
+    }
+
+    // Validate file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      return;
+    }
+
+    setIsUploading(true);
+    try {
+      const mediaUrl = await uploadMedia(file, 'image');
+      if (mediaUrl) {
+        await sendMessage(conversationId, 'Image', 'image', mediaUrl);
+      }
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  // Audio recording handlers
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const audioFile = new File([audioBlob], `audio_${Date.now()}.webm`, { type: 'audio/webm' });
+
+        setIsUploading(true);
+        try {
+          const mediaUrl = await uploadMedia(audioFile, 'audio');
+          if (mediaUrl) {
+            await sendMessage(conversationId, 'Voice message', 'audio', mediaUrl);
+          }
+        } finally {
+          setIsUploading(false);
+        }
+
+        // Stop all tracks
+        stream.getTracks().forEach(track => track.stop());
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+      setRecordingTime(0);
+
+      // Start recording timer
+      recordingIntervalRef.current = setInterval(() => {
+        setRecordingTime(prev => prev + 1);
+      }, 1000);
+    } catch (error) {
+      console.error('Error starting recording:', error);
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+      if (recordingIntervalRef.current) {
+        clearInterval(recordingIntervalRef.current);
+        recordingIntervalRef.current = null;
+      }
+    }
+  };
+
+  const formatRecordingTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  // Audio playback handler
+  const toggleAudioPlayback = (messageId: string, audioUrl: string) => {
+    let audio = audioElementsRef.current.get(messageId);
+
+    if (!audio) {
+      audio = new Audio(audioUrl);
+      audio.onended = () => setPlayingAudioId(null);
+      audioElementsRef.current.set(messageId, audio);
+    }
+
+    if (playingAudioId === messageId) {
+      audio.pause();
+      setPlayingAudioId(null);
+    } else {
+      // Pause any currently playing audio
+      if (playingAudioId) {
+        const currentAudio = audioElementsRef.current.get(playingAudioId);
+        currentAudio?.pause();
+      }
+      audio.play();
+      setPlayingAudioId(messageId);
     }
   };
 
@@ -284,9 +433,21 @@ export const ChatWindow = ({
                   
                   {/* Messages for this date */}
                   {group.messages.map((message) => {
-                    const isOwn = message.sender_id === user?.id;
+                    // A message is "own" if the sender_id matches current user's id
+                    // Use strict comparison and ensure both values exist
+                    // Also validate against otherUserId for extra safety
+                    const currentUserId = user?.id;
+                    const messageSenderId = message.sender_id;
+
+                    // If sender is the other user, it's definitely not our message
+                    const isFromOtherUser = otherUserId && messageSenderId === otherUserId;
+                    // A message is ours only if we have a valid user ID and sender matches
+                    const isOwn = !isFromOtherUser && Boolean(currentUserId) && messageSenderId === currentUserId;
+
                     const isContact = message.message_type === 'contact';
                     const isSystem = message.message_type === 'system';
+                    const isImage = message.message_type === 'image';
+                    const isAudio = message.message_type === 'audio';
 
                     return (
                       <motion.div
@@ -306,10 +467,12 @@ export const ChatWindow = ({
                             </Avatar>
                           )}
                           <div className={`relative rounded-2xl px-4 py-2 ${
-                            isSystem 
+                            isSystem
                               ? 'bg-[#F5F3F4] text-[#660708]/70 text-center text-sm'
                               : isContact
                               ? 'bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-200'
+                              : isImage
+                              ? 'p-1 bg-transparent'
                               : isOwn
                               ? 'bg-gradient-to-r from-[#E5383B] to-[#BA181B] text-white'
                               : 'bg-[#F5F3F4] text-[#161A1D]'
@@ -319,12 +482,52 @@ export const ChatWindow = ({
                                 <Phone className="h-4 w-4 text-green-700" />
                                 <div>
                                   <p className="text-xs font-semibold text-green-900 mb-1">Contact Number</p>
-                                  <a 
+                                  <a
                                     href={`tel:${message.content}`}
                                     className="text-lg font-bold text-green-700 hover:underline"
                                   >
                                     {message.content}
                                   </a>
+                                </div>
+                              </div>
+                            ) : isImage && message.media_url ? (
+                              <div className="rounded-xl overflow-hidden">
+                                <img
+                                  src={message.media_url}
+                                  alt="Shared image"
+                                  className="max-w-[250px] max-h-[250px] object-cover cursor-pointer hover:opacity-90 transition-opacity"
+                                  onClick={() => window.open(message.media_url!, '_blank')}
+                                />
+                              </div>
+                            ) : isAudio && message.media_url ? (
+                              <div className={`flex items-center gap-3 min-w-[180px] ${
+                                isOwn ? 'bg-white/20' : 'bg-[#E5383B]/10'
+                              } rounded-full px-3 py-2`}>
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  className={`h-8 w-8 rounded-full ${
+                                    isOwn ? 'hover:bg-white/20 text-white' : 'hover:bg-[#E5383B]/20 text-[#E5383B]'
+                                  }`}
+                                  onClick={() => toggleAudioPlayback(message.id, message.media_url!)}
+                                >
+                                  {playingAudioId === message.id ? (
+                                    <Pause className="h-4 w-4" />
+                                  ) : (
+                                    <Play className="h-4 w-4" />
+                                  )}
+                                </Button>
+                                <div className="flex-1">
+                                  <div className={`h-1 rounded-full ${
+                                    isOwn ? 'bg-white/40' : 'bg-[#E5383B]/30'
+                                  }`}>
+                                    <div className={`h-full w-0 rounded-full ${
+                                      isOwn ? 'bg-white' : 'bg-[#E5383B]'
+                                    } ${playingAudioId === message.id ? 'animate-pulse' : ''}`} />
+                                  </div>
+                                  <span className={`text-xs ${isOwn ? 'text-white/70' : 'text-[#660708]/50'}`}>
+                                    Voice message
+                                  </span>
                                 </div>
                               </div>
                             ) : (
@@ -417,7 +620,90 @@ export const ChatWindow = ({
               </p>
             </div>
           )}
-          <div className="flex gap-2">
+
+          {/* Recording indicator */}
+          {isRecording && (
+            <div className="mb-2 p-2 bg-red-50 border border-red-200 rounded-lg flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse" />
+                <span className="text-sm text-red-700">Recording... {formatRecordingTime(recordingTime)}</span>
+              </div>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={stopRecording}
+                className="text-red-700 hover:bg-red-100"
+              >
+                <Square className="h-4 w-4 mr-1" />
+                Stop
+              </Button>
+            </div>
+          )}
+
+          {/* Uploading indicator */}
+          {isUploading && (
+            <div className="mb-2 p-2 bg-blue-50 border border-blue-200 rounded-lg flex items-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
+              <span className="text-sm text-blue-700">Uploading...</span>
+            </div>
+          )}
+
+          <div className="flex items-center gap-2">
+            {/* Emoji Picker */}
+            <Popover open={showEmojiPicker} onOpenChange={setShowEmojiPicker}>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-9 w-9 hover:bg-[#E5383B]/10"
+                  disabled={isRecording || isUploading}
+                >
+                  <Smile className="h-5 w-5 text-[#660708]/70" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-full p-0 border-none" side="top" align="start">
+                <EmojiPicker
+                  onEmojiClick={handleEmojiClick}
+                  width={300}
+                  height={350}
+                />
+              </PopoverContent>
+            </Popover>
+
+            {/* Image Upload */}
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleImageSelect}
+              accept="image/*"
+              className="hidden"
+            />
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-9 w-9 hover:bg-[#E5383B]/10"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isRecording || isUploading}
+            >
+              <ImageIcon className="h-5 w-5 text-[#660708]/70" />
+            </Button>
+
+            {/* Audio Recording */}
+            <Button
+              variant="ghost"
+              size="icon"
+              className={`h-9 w-9 ${isRecording ? 'bg-red-100 hover:bg-red-200' : 'hover:bg-[#E5383B]/10'}`}
+              onClick={isRecording ? stopRecording : startRecording}
+              disabled={isUploading}
+            >
+              {isRecording ? (
+                <Square className="h-5 w-5 text-red-600" />
+              ) : (
+                <Mic className="h-5 w-5 text-[#660708]/70" />
+              )}
+            </Button>
+
+            {/* Message Input */}
             <Input
               ref={inputRef}
               value={inputValue}
@@ -425,10 +711,13 @@ export const ChatWindow = ({
               onKeyPress={handleKeyPress}
               placeholder="Type a message..."
               className="flex-1 bg-white border-[#E5383B]/20 focus:border-[#E5383B]"
+              disabled={isRecording || isUploading}
             />
+
+            {/* Send Button */}
             <Button
               onClick={handleSend}
-              disabled={!inputValue.trim()}
+              disabled={!inputValue.trim() || isRecording || isUploading}
               className="bg-gradient-to-r from-[#E5383B] to-[#BA181B] hover:opacity-90 disabled:opacity-50"
             >
               <Send className="h-4 w-4" />

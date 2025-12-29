@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(node verify-messages.js:*)",
-      "Bash(node check-deleted.js:*)",
-      "Bash(node test-redis.js:*)"
-    ]
-  }
-}
