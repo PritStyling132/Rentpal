@@ -6,7 +6,7 @@ services:
     container_name: rentpal-postgres
     restart: unless-stopped
     ports:
-      - "5432:5432"
+      - "5433:5432"
     environment:
       POSTGRES_DB: ${DB_NAME:-rentpal}
       POSTGRES_USER: ${DB_USER:-rentpal_user}

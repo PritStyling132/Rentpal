@@ -93,7 +93,7 @@ process.on('SIGTERM', gracefulShutdown);
 process.on('SIGINT', gracefulShutdown);
 
 // Start server
-const PORT = process.env.API_PORT || 3001;
+const PORT = process.env.API_PORT || 3002;
 
 const startServer = async () => {
   try {
