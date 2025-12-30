@@ -8,16 +8,16 @@ import { useAdminStats } from '@/hooks/useAdminStats';
 import { CheckCircle, XCircle, Clock, IndianRupee, Users, TrendingUp, Download, FileSpreadsheet, FileText, ScrollText, Trophy, Bell, Tag, Activity, BarChart3, Package } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from '@/hooks/use-toast';
-import { supabase } from '@/integrations/supabase/client';
+import { adminApi, listingsApi } from '@/lib/api';
 
 interface ActivityLog {
   id: string;
-  admin_id: string;
+  adminId: string;
   action: string;
-  target_type: string;
-  target_id: string;
+  targetType: string;
+  targetId: string;
   details: any;
-  created_at: string;
+  createdAt: string;
 }
 
 const AdminDashboard = () => {
@@ -31,11 +31,7 @@ const AdminDashboard = () => {
 
   const refetchActivityLogs = async () => {
     try {
-      const { data: adminLogs } = await supabase
-        .from('admin_activity_logs')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(10);
+      const adminLogs = await adminApi.getActivityLogs(10);
       setActivityLogs(adminLogs || []);
     } catch (error) {
       console.error('Error fetching activity logs:', error);
@@ -53,16 +49,8 @@ const AdminDashboard = () => {
   const handleApprove = async (listingId: string) => {
     setLoading(listingId);
     const success = await approveListing(listingId);
-    
-    if (success) {
-      await supabase.from('admin_activity_logs').insert({
-        admin_id: user?.id,
-        action: 'APPROVE_LISTING',
-        target_type: 'listing',
-        target_id: listingId,
-        details: { timestamp: new Date().toISOString() }
-      });
 
+    if (success) {
       toast({
         title: "Listing approved!",
         description: "The listing is now live on the marketplace.",
@@ -77,16 +65,8 @@ const AdminDashboard = () => {
   const handleReject = async (listingId: string) => {
     setLoading(listingId);
     const success = await rejectListing(listingId);
-    
-    if (success) {
-      await supabase.from('admin_activity_logs').insert({
-        admin_id: user?.id,
-        action: 'REJECT_LISTING',
-        target_type: 'listing',
-        target_id: listingId,
-        details: { timestamp: new Date().toISOString() }
-      });
 
+    if (success) {
       toast({
         title: "Listing rejected",
         description: "The listing has been rejected.",
@@ -101,16 +81,8 @@ const AdminDashboard = () => {
 
   const downloadReport = async () => {
     try {
-      await supabase.from('admin_activity_logs').insert({
-        admin_id: user?.id,
-        action: 'DOWNLOAD_REPORT',
-        target_type: 'system',
-        target_id: 'report',
-        details: { timestamp: new Date().toISOString() }
-      });
-
-      const { data: listings } = await supabase.from('listings').select('*');
-      const { data: profiles } = await supabase.from('profiles').select('*');
+      // Get all listings for report
+      const listings = await listingsApi.getAll();
 
       let csv = 'RENTKARO ADMIN REPORT\n\n';
       csv += 'SUMMARY STATISTICS\n';
@@ -123,8 +95,8 @@ const AdminDashboard = () => {
 
       csv += 'ALL LISTINGS\n';
       csv += 'ID,Product Name,Description,Rent Price,Pin Code,Status,Created At\n';
-      listings?.forEach(l => {
-        csv += `"${l.id}","${l.product_name}","${l.description}",${l.rent_price},"${l.pin_code}","${l.listing_status}","${l.created_at}"\n`;
+      listings?.forEach((l: any) => {
+        csv += `"${l.id}","${l.productName}","${l.description}",${l.rentPrice},"${l.pinCode}","${l.listingStatus}","${l.createdAt}"\n`;
       });
 
       const blob = new Blob([csv], { type: 'text/csv' });

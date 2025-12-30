@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Calendar, ArrowLeft, ExternalLink, Clock } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
+import api from "@/lib/api";
 import { motion } from "framer-motion";
 import { SEOHead } from "@/components/SEOHead";
 import { Blog } from "@/hooks/useBlogs";
@@ -29,26 +29,56 @@ const BlogPost = () => {
       if (!id) return;
 
       try {
-        const { data, error } = await supabase
-          .from('blogs')
-          .select('*')
-          .eq('id', id)
-          .eq('published', true)
-          .single();
+        const response = await api.get(`/blogs/${id}`);
+        const data = response.data;
 
-        if (error) throw error;
-        setBlog(data);
+        // Transform camelCase to snake_case for component compatibility
+        const transformedBlog: Blog = {
+          id: data.id,
+          title: data.title,
+          description: data.description,
+          content: data.content,
+          image_url: data.imageUrl,
+          category: data.category,
+          tags: data.tags,
+          published: data.published,
+          author_name: data.authorName,
+          reference_url: data.referenceUrl,
+          reading_time: data.readingTime,
+          seo_title: data.seoTitle,
+          meta_description: data.metaDescription,
+          meta_keywords: data.metaKeywords,
+          og_image: data.ogImage,
+          created_at: data.createdAt,
+          updated_at: data.updatedAt,
+        };
+
+        setBlog(transformedBlog);
 
         // Fetch suggested blogs (same category, excluding current)
-        const { data: suggested } = await supabase
-          .from('blogs')
-          .select('*')
-          .eq('published', true)
-          .eq('category', data.category)
-          .neq('id', id)
-          .limit(3);
+        const suggestedResponse = await api.get('/blogs', {
+          params: { category: data.category, limit: 4 }
+        });
+        const suggestedData = suggestedResponse.data || [];
 
-        setSuggestedBlogs(suggested || []);
+        // Transform and filter out current blog
+        const transformedSuggested = suggestedData
+          .filter((b: any) => b.id !== id)
+          .slice(0, 3)
+          .map((b: any) => ({
+            id: b.id,
+            title: b.title,
+            description: b.description,
+            content: b.content,
+            image_url: b.imageUrl,
+            category: b.category,
+            tags: b.tags,
+            published: b.published,
+            author_name: b.authorName,
+            created_at: b.createdAt,
+          }));
+
+        setSuggestedBlogs(transformedSuggested);
       } catch (error) {
         console.error('Error fetching blog:', error);
       } finally {

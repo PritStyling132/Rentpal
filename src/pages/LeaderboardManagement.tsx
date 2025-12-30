@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/integrations/supabase/client';
+import api from '@/lib/api';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
@@ -31,26 +31,21 @@ const LeaderboardManagement = () => {
   }, [isAdmin, navigate]);
 
   const fetchVisibility = async () => {
-    const { data } = await supabase
-      .from('section_visibility')
-      .select('is_visible')
-      .eq('section_name', 'leaderboard')
-      .single();
-
-    if (data) {
-      setIsVisible(data.is_visible);
+    try {
+      const response = await api.get('/admin/section-visibility/leaderboard');
+      const data = response.data;
+      if (data) {
+        setIsVisible(data.isVisible);
+      }
+    } catch (error) {
+      console.error('Error fetching visibility:', error);
     }
   };
 
   const handleVisibilityToggle = async (checked: boolean) => {
     setIsLoading(true);
     try {
-      const { error } = await supabase
-        .from('section_visibility')
-        .update({ is_visible: checked })
-        .eq('section_name', 'leaderboard');
-
-      if (error) throw error;
+      await api.put('/admin/section-visibility/leaderboard', { isVisible: checked });
 
       setIsVisible(checked);
       toast({
@@ -71,9 +66,7 @@ const LeaderboardManagement = () => {
   const handleSyncTopProfiles = async () => {
     setIsSyncing(true);
     try {
-      const { error } = await supabase.rpc('sync_top_profiles');
-
-      if (error) throw error;
+      await api.post('/admin/leaderboard/sync-top-profiles');
 
       toast({
         title: 'Success',
@@ -107,42 +100,12 @@ const LeaderboardManagement = () => {
         .map(id => id.trim())
         .filter(id => id.length > 0);
 
-      const { data: users, error: fetchError } = await supabase
-        .from('profiles')
-        .select('id, name, current_streak')
-        .in('id', userIds);
-
-      if (fetchError) throw fetchError;
-
-      if (!users || users.length === 0) {
-        toast({
-          title: 'Error',
-          description: 'No valid users found',
-          variant: 'destructive',
-        });
-        return;
-      }
-
-      const { data: { user: currentUser } } = await supabase.auth.getUser();
-
-      const topProfiles = users.map((user, index) => ({
-        user_id: user.id,
-        name: user.name,
-        avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.id}`,
-        streak: user.current_streak,
-        display_order: index + 1,
-        created_by: currentUser?.id,
-      }));
-
-      const { error: insertError } = await supabase
-        .from('top_profiles')
-        .insert(topProfiles);
-
-      if (insertError) throw insertError;
+      const response = await api.post('/admin/leaderboard/bulk-add', { userIds });
+      const result = response.data;
 
       toast({
         title: 'Success',
-        description: `Added ${users.length} members to top profiles`,
+        description: `Added ${result.addedCount || userIds.length} members to top profiles`,
       });
       setBulkUserIds('');
     } catch (error) {

@@ -1,22 +1,64 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { User, Session } from '@supabase/supabase-js';
-import { supabase } from '@/integrations/supabase/client';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { authApi, setTokens, clearTokens, getAccessToken, getRefreshToken } from '@/lib/api';
 import { toast } from '@/hooks/use-toast';
+
+export type UserRole = 'user' | 'owner' | 'admin';
+
+interface User {
+  id: string;
+  email: string;
+  emailVerified: boolean;
+}
+
+interface UserProfile {
+  id: string;
+  name: string;
+  phone: string | null;
+  pinCode: string | null;
+  avatarUrl: string | null;
+  userType: 'user' | 'owner';
+  businessName: string | null;
+  businessAddress: string | null;
+  gstNumber: string | null;
+  ownerVerified: boolean;
+  totalListings: number;
+  totalRentalsCompleted: number;
+  ownerRating: number | null;
+  bio: string | null;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  country: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
 
 interface AuthContextType {
   user: User | null;
-  session: Session | null;
+  profile: UserProfile | null;
   isAdmin: boolean;
+  isOwner: boolean;
+  userType: 'user' | 'owner' | null;
   authReady: boolean;
-  login: (email: string, password: string) => Promise<boolean>;
+  login: (email: string, password: string) => Promise<{ success: boolean; userType?: 'user' | 'owner' }>;
   signup: (userData: {
     name: string;
     email: string;
     phone: string;
     password: string;
-    pin_code: string;
+    pinCode: string;
+    userType: 'user' | 'owner';
+    businessName?: string;
+    businessAddress?: string;
+    gstNumber?: string;
   }) => Promise<boolean>;
   logout: () => Promise<void>;
+  upgradeToOwner: (businessData: {
+    businessName: string;
+    businessAddress?: string;
+    gstNumber?: string;
+  }) => Promise<boolean>;
+  refreshProfile: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -29,91 +71,144 @@ export const useAuth = () => {
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isOwner, setIsOwner] = useState(false);
+  const [userType, setUserType] = useState<'user' | 'owner' | null>(null);
   const [authReady, setAuthReady] = useState(false);
 
-  useEffect(() => {
-    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) checkAdminStatus(session.user.id);
-      else setIsAdmin(false);
-      setAuthReady(true);
-    });
-
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) checkAdminStatus(session.user.id);
-      setAuthReady(true);
-    });
-
-    return () => listener.subscription.unsubscribe();
+  const updateAuthState = useCallback((data: {
+    user: User;
+    profile: UserProfile | null;
+    isAdmin: boolean;
+    isOwner: boolean;
+  }) => {
+    setUser(data.user);
+    setProfile(data.profile);
+    setIsAdmin(data.isAdmin);
+    setIsOwner(data.isOwner);
+    setUserType(data.profile?.userType || 'user');
   }, []);
 
-  const checkAdminStatus = async (userId: string) => {
+  const clearAuthState = useCallback(() => {
+    setUser(null);
+    setProfile(null);
+    setIsAdmin(false);
+    setIsOwner(false);
+    setUserType(null);
+  }, []);
+
+  const refreshProfile = useCallback(async () => {
     try {
-      const { data, error } = await supabase
-        .from('user_roles')
-        .select('role')
-        .eq('user_id', userId)
-        .eq('role', 'admin')
-        .maybeSingle();
-      if (error) {
-        setIsAdmin(false);
+      const response = await authApi.getMe();
+      if (response.data.success && response.data.data) {
+        const { user: userData, profile: profileData, isAdmin: adminStatus, isOwner: ownerStatus } = response.data.data;
+        updateAuthState({
+          user: userData,
+          profile: profileData,
+          isAdmin: adminStatus,
+          isOwner: ownerStatus,
+        });
+      }
+    } catch (error) {
+      console.error('Error refreshing profile:', error);
+    }
+  }, [updateAuthState]);
+
+  // Check for existing session on mount
+  useEffect(() => {
+    const initializeAuth = async () => {
+      const token = getAccessToken();
+
+      if (!token) {
+        setAuthReady(true);
         return;
       }
-      setIsAdmin(!!data);
-    } catch {
-      setIsAdmin(false);
-    }
-  };
 
-  // ✅ FIXED SIGNUP FUNCTION (no 422 error)
+      try {
+        const response = await authApi.getMe();
+        if (response.data.success && response.data.data) {
+          const { user: userData, profile: profileData, isAdmin: adminStatus, isOwner: ownerStatus } = response.data.data;
+          updateAuthState({
+            user: userData,
+            profile: profileData,
+            isAdmin: adminStatus,
+            isOwner: ownerStatus,
+          });
+        } else {
+          clearTokens();
+          clearAuthState();
+        }
+      } catch (error) {
+        console.error('Error checking auth status:', error);
+        clearTokens();
+        clearAuthState();
+      } finally {
+        setAuthReady(true);
+      }
+    };
+
+    initializeAuth();
+  }, [updateAuthState, clearAuthState]);
+
   const signup = async (userData: {
     name: string;
     email: string;
     phone: string;
     password: string;
-    pin_code: string;
+    pinCode: string;
+    userType: 'user' | 'owner';
+    businessName?: string;
+    businessAddress?: string;
+    gstNumber?: string;
   }) => {
     try {
-      const { data, error } = await supabase.auth.signUp({
+      const response = await authApi.signup({
         email: userData.email,
         password: userData.password,
-        options: {
-          data: {
-            name: userData.name,
-            phone: userData.phone,
-            pin_code: userData.pin_code,
-          },
-          // ✅ correct redirect key (Supabase v2)
-          emailRedirectTo: `${window.location.origin}/auth/callback`,
-        },
+        name: userData.name,
+        phone: userData.phone,
+        pinCode: userData.pinCode,
+        userType: userData.userType,
+        businessName: userData.businessName,
+        businessAddress: userData.businessAddress,
+        gstNumber: userData.gstNumber,
       });
 
-      if (error) {
-        console.error('Signup error:', error);
+      if (!response.data.success) {
         toast({
           title: 'Signup failed',
-          description: error.message || 'Unable to create account.',
+          description: response.data.error || 'Unable to create account.',
           variant: 'destructive',
         });
         return false;
       }
 
+      const { user: newUser, profile: newProfile, isAdmin: adminStatus, isOwner: ownerStatus, accessToken, refreshToken } = response.data.data;
+
+      // Store tokens
+      setTokens(accessToken, refreshToken);
+
+      // Update state
+      updateAuthState({
+        user: newUser,
+        profile: newProfile,
+        isAdmin: adminStatus,
+        isOwner: ownerStatus,
+      });
+
       toast({
-        title: 'Account created successfully 🎉',
-        description: 'Please check your email to verify your account.',
+        title: 'Account created successfully!',
+        description: `Welcome to RentPal${userData.userType === 'owner' ? ' as an Owner' : ''}!`,
       });
 
       return true;
     } catch (error: any) {
-      console.error('Unexpected signup error:', error);
+      console.error('Signup error:', error);
+      const errorMessage = error.response?.data?.error || 'Something went wrong while signing up.';
       toast({
-        title: 'Error',
-        description: 'Something went wrong while signing up.',
+        title: 'Signup failed',
+        description: errorMessage,
         variant: 'destructive',
       });
       return false;
@@ -122,88 +217,129 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const login = async (email: string, password: string) => {
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
+      const response = await authApi.login(email, password);
 
-      if (error) {
-        const message = (error.message || '').toLowerCase();
-        const isUnconfirmed = message.includes('confirm') || message.includes('not confirmed');
-        if (isUnconfirmed) {
-          try {
-            await supabase.auth.resend({
-              type: 'signup',
-              email,
-              options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
-            });
-            toast({
-              title: 'Verify your email',
-              description: 'We resent the verification email. Please check your inbox.',
-            });
-          } catch (_) {
-            // fall through to generic error toast
-          }
-        }
+      if (!response.data.success) {
         toast({
           title: 'Login failed',
-          description: error.message,
+          description: response.data.error || 'Invalid credentials.',
+          variant: 'destructive',
+        });
+        return { success: false };
+      }
+
+      const { user: loggedInUser, profile: userProfile, isAdmin: adminStatus, isOwner: ownerStatus, accessToken, refreshToken } = response.data.data;
+
+      // Store tokens
+      setTokens(accessToken, refreshToken);
+
+      // Update state
+      updateAuthState({
+        user: loggedInUser,
+        profile: userProfile,
+        isAdmin: adminStatus,
+        isOwner: ownerStatus,
+      });
+
+      const detectedUserType = userProfile?.userType || 'user';
+
+      toast({
+        title: 'Welcome back!',
+        description: `You are now logged in as ${detectedUserType === 'owner' ? 'an Owner' : 'a User'}.`,
+      });
+
+      return { success: true, userType: detectedUserType };
+    } catch (error: any) {
+      console.error('Login error:', error);
+      const errorMessage = error.response?.data?.error || 'Unable to login. Please try again.';
+      toast({
+        title: 'Login failed',
+        description: errorMessage,
+        variant: 'destructive',
+      });
+      return { success: false };
+    }
+  };
+
+  const logout = async () => {
+    try {
+      const refreshToken = getRefreshToken();
+      await authApi.logout(refreshToken || undefined);
+    } catch (error) {
+      console.error('Logout error:', error);
+    } finally {
+      clearTokens();
+      clearAuthState();
+
+      toast({
+        title: 'Logged out',
+        description: 'You have been successfully logged out.',
+      });
+    }
+  };
+
+  const upgradeToOwner = async (businessData: {
+    businessName: string;
+    businessAddress?: string;
+    gstNumber?: string;
+  }) => {
+    if (!user?.id) return false;
+
+    try {
+      const response = await authApi.upgradeToOwner(businessData);
+
+      if (!response.data.success) {
+        toast({
+          title: 'Upgrade failed',
+          description: response.data.error || 'Could not upgrade your account to Owner.',
           variant: 'destructive',
         });
         return false;
       }
 
-      toast({
-        title: 'Welcome back!',
-        description: 'You are now logged in.',
+      const { user: updatedUser, profile: updatedProfile, isAdmin: adminStatus, isOwner: ownerStatus } = response.data.data;
+
+      updateAuthState({
+        user: updatedUser,
+        profile: updatedProfile,
+        isAdmin: adminStatus,
+        isOwner: ownerStatus,
       });
 
-      if (data.user) {
-        await supabase.rpc('update_user_activity');
-        await supabase.from('user_activity_logs').insert({
-          user_id: data.user.id,
-          action: 'USER_LOGIN',
-          details: {
-            email,
-            timestamp: new Date().toISOString(),
-          },
-        });
-        await supabase.rpc('sync_top_profiles');
-      }
+      toast({
+        title: 'Account upgraded!',
+        description: 'You are now registered as an Owner. Start listing your items!',
+      });
 
       return true;
     } catch (error: any) {
+      console.error('Upgrade error:', error);
+      const errorMessage = error.response?.data?.error || 'Failed to upgrade account.';
       toast({
-        title: 'Login failed',
-        description: 'Unable to login. Please try again.',
+        title: 'Upgrade failed',
+        description: errorMessage,
         variant: 'destructive',
       });
       return false;
     }
   };
 
-  const logout = async () => {
-    if (user?.id) {
-      await supabase.from('user_activity_logs').insert({
-        user_id: user.id,
-        action: 'USER_LOGOUT',
-        details: { timestamp: new Date().toISOString() },
-      });
-    }
-
-    await supabase.auth.signOut();
-    setUser(null);
-    setSession(null);
-    setIsAdmin(false);
-
-    toast({
-      title: 'Logged out',
-      description: 'You have been successfully logged out.',
-    });
-  };
-
   return (
-    <AuthContext.Provider value={{ user, session, isAdmin, authReady, login, signup, logout }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        profile,
+        isAdmin,
+        isOwner,
+        userType,
+        authReady,
+        login,
+        signup,
+        logout,
+        upgradeToOwner,
+        refreshProfile,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

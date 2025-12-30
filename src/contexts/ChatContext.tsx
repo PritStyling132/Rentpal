@@ -1,7 +1,8 @@
 import { createContext, useContext, useState, useEffect, useRef, useCallback, ReactNode } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
+import { getAccessToken, uploadApi } from '@/lib/api';
+import api from '@/lib/api';
 
 export interface Message {
   id: string;
@@ -76,7 +77,7 @@ const getWsUrl = () => {
 const WS_URL = getWsUrl();
 
 export const ChatProvider = ({ children }: { children: ReactNode }) => {
-  const { user, session } = useAuth();
+  const { user } = useAuth();
   const [isConnected, setIsConnected] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [messages, setMessages] = useState<Record<string, Message[]>>({});
@@ -194,20 +195,19 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
 
   // Connect to WebSocket
   const connect = useCallback(async () => {
-    if (!user || !session) return;
+    if (!user) return;
     if (isConnectingRef.current) return;
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
     if (wsRef.current?.readyState === WebSocket.CONNECTING) return;
 
     isConnectingRef.current = true;
 
-    const { data: { session: freshSession } } = await supabase.auth.getSession();
-    if (!freshSession) {
+    const token = getAccessToken();
+    if (!token) {
       isConnectingRef.current = false;
       return;
     }
 
-    const token = freshSession.access_token;
     const wsUrl = `${WS_URL}?token=${encodeURIComponent(token)}`;
 
     console.log('ChatContext: Connecting to WebSocket at:', WS_URL);
@@ -251,46 +251,48 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
         reconnectTimeoutRef.current = setTimeout(() => connect(), 3000);
       }
     };
-  }, [user, session, handleWebSocketMessage]);
+  }, [user, handleWebSocketMessage]);
 
   // Load conversations
   const loadConversations = useCallback(async () => {
     if (!user) return;
 
     try {
-      const { data: conversationsData, error: convError } = await supabase
-        .from('conversations')
-        .select('*, listing:listings(product_name, images)')
-        .or(`owner_id.eq.${user.id},leaser_id.eq.${user.id}`)
-        .order('updated_at', { ascending: false });
+      const response = await api.get('/users/conversations');
+      const conversationsData = response.data;
 
-      if (convError) throw convError;
       if (!conversationsData?.length) {
         setConversations([]);
         return;
       }
 
-      const userIds = new Set<string>();
-      conversationsData.forEach((conv: any) => {
-        userIds.add(conv.owner_id);
-        userIds.add(conv.leaser_id);
-      });
-
-      const { data: profilesData } = await supabase
-        .from('profiles')
-        .select('id, name, avatar_url')
-        .in('id', Array.from(userIds));
-
-      const profilesMap = new Map();
-      (profilesData || []).forEach((profile: any) => profilesMap.set(profile.id, profile));
-
+      // Transform to expected format
       const formatted = conversationsData.map((conv: any) => ({
-        ...conv,
-        owner: profilesMap.get(conv.owner_id) || { id: conv.owner_id, name: 'Owner', avatar_url: null },
-        leaser: profilesMap.get(conv.leaser_id) || { id: conv.leaser_id, name: 'Leaser', avatar_url: null },
-        other_user: conv.owner_id === user.id
-          ? profilesMap.get(conv.leaser_id) || { id: conv.leaser_id, name: 'Leaser', avatar_url: null }
-          : profilesMap.get(conv.owner_id) || { id: conv.owner_id, name: 'Owner', avatar_url: null }
+        id: conv.id,
+        listing_id: conv.listingId,
+        owner_id: conv.ownerId,
+        leaser_id: conv.leaserId,
+        contact_request_status: conv.contactRequestStatus,
+        contact_shared: conv.contactShared,
+        created_at: conv.createdAt,
+        updated_at: conv.updatedAt,
+        listing: conv.listing ? {
+          product_name: conv.listing.productName,
+          images: conv.listing.images
+        } : null,
+        owner: conv.owner ? {
+          id: conv.owner.id,
+          name: conv.owner.name,
+          avatar_url: conv.owner.avatarUrl
+        } : { id: conv.ownerId, name: 'Owner', avatar_url: null },
+        leaser: conv.leaser ? {
+          id: conv.leaser.id,
+          name: conv.leaser.name,
+          avatar_url: conv.leaser.avatarUrl
+        } : { id: conv.leaserId, name: 'Leaser', avatar_url: null },
+        other_user: conv.ownerId === user.id
+          ? (conv.leaser ? { id: conv.leaser.id, name: conv.leaser.name, avatar_url: conv.leaser.avatarUrl } : { id: conv.leaserId, name: 'Leaser', avatar_url: null })
+          : (conv.owner ? { id: conv.owner.id, name: conv.owner.name, avatar_url: conv.owner.avatarUrl } : { id: conv.ownerId, name: 'Owner', avatar_url: null })
       }));
 
       setConversations(formatted);
@@ -309,86 +311,28 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
     console.log('loadMessages called for:', conversationId, 'user:', user.id);
 
     try {
-      // First, let's check if the conversation exists and user has access
-      const { data: convData, error: convError } = await supabase
-        .from('conversations')
-        .select('id, owner_id, leaser_id')
-        .eq('id', conversationId)
-        .single();
+      const response = await api.get(`/users/conversations/${conversationId}/messages`);
+      const data = response.data;
 
-      if (convError) {
-        console.error('Error checking conversation access:', convError);
-      } else {
-        console.log('Conversation access check:', {
-          conversationId,
-          ownerId: convData?.owner_id,
-          leaserId: convData?.leaser_id,
-          currentUserId: user.id,
-          hasAccess: convData?.owner_id === user.id || convData?.leaser_id === user.id
-        });
-      }
+      console.log('Loaded messages from API:', data?.length || 0, 'for conversation:', conversationId);
 
-      // Try to fetch messages - handle case where deleted_at column might not exist
-      let data: any[] | null = null;
-      let error: any = null;
-
-      // First try with deleted_at filter
-      const result = await supabase
-        .from('messages')
-        .select('*')
-        .eq('conversation_id', conversationId)
-        .is('deleted_at', null)
-        .order('created_at', { ascending: true });
-
-      data = result.data;
-      error = result.error;
-
-      // If error mentions deleted_at column, try without it
-      if (error && error.message?.includes('deleted_at')) {
-        console.log('deleted_at column not found, fetching without filter');
-        const fallbackResult = await supabase
-          .from('messages')
-          .select('*')
-          .eq('conversation_id', conversationId)
-          .order('created_at', { ascending: true });
-
-        data = fallbackResult.data;
-        error = fallbackResult.error;
-      }
-
-      if (error) {
-        console.error('Error loading messages:', error);
-        throw error;
-      }
-
-      console.log('Loaded messages from DB:', data?.length || 0, 'for conversation:', conversationId);
-
-      // Log all message details for debugging
-      if (data && data.length > 0) {
-        console.log('Messages detail:', data.map((m: any) => ({
-          id: m.id.substring(0, 8),
-          sender: m.sender_id.substring(0, 8),
-          type: m.message_type,
-          content: m.content?.substring(0, 20),
-          media_url: m.media_url ? 'YES' : 'NO'
-        })));
-      }
-
-      // Debug: Log media messages to verify media_url is being fetched
-      const mediaMessages = (data || []).filter((m: any) => m.message_type === 'image' || m.message_type === 'audio');
-      if (mediaMessages.length > 0) {
-        console.log('Media messages loaded:', mediaMessages.map((m: any) => ({
-          id: m.id,
-          type: m.message_type,
-          media_url: m.media_url,
-          hasMediaUrl: Boolean(m.media_url)
-        })));
-      }
+      // Transform messages to expected format
+      const formattedMessages = (data || []).map((m: any) => ({
+        id: m.id,
+        conversation_id: m.conversationId,
+        sender_id: m.senderId,
+        content: m.content,
+        message_type: m.messageType,
+        media_url: m.mediaUrl,
+        read_at: m.readAt,
+        deleted_at: m.deletedAt,
+        created_at: m.createdAt
+      }));
 
       // Merge with existing messages to avoid losing real-time messages
       setMessages(prev => {
         const existingMessages = prev[conversationId] || [];
-        const dbMessages = (data as Message[]) || [];
+        const dbMessages = formattedMessages as Message[];
 
         // Create a map of all messages by ID
         const messageMap = new Map<string, Message>();
@@ -404,18 +348,16 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
           new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
         );
 
-        console.log('Merged messages count:', mergedMessages.length);
-
         return { ...prev, [conversationId]: mergedMessages };
       });
 
-      // Mark unread messages as read
+      // Mark unread messages as read via API
       const unreadIds = (data || [])
-        .filter(m => m.sender_id !== user.id && !m.read_at)
-        .map(m => m.id);
+        .filter((m: any) => m.senderId !== user.id && !m.readAt)
+        .map((m: any) => m.id);
 
       if (unreadIds.length > 0) {
-        await supabase.from('messages').update({ read_at: new Date().toISOString() }).in('id', unreadIds);
+        await api.post(`/users/conversations/${conversationId}/mark-read`, { messageIds: unreadIds });
       }
     } catch (error) {
       console.error('Error loading messages:', error);
@@ -427,23 +369,8 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
     if (!user) return null;
 
     try {
-      const { data: existing } = await supabase
-        .from('conversations')
-        .select('*')
-        .eq('listing_id', listingId)
-        .eq('leaser_id', user.id)
-        .maybeSingle();
-
-      if (existing) return existing;
-
-      const { data, error } = await supabase
-        .from('conversations')
-        .insert({ listing_id: listingId, owner_id: ownerId, leaser_id: user.id, contact_request_status: 'pending' })
-        .select()
-        .single();
-
-      if (error) throw error;
-
+      const response = await api.post('/users/conversations', { listingId, ownerId });
+      const data = response.data;
       await loadConversations();
       return data;
     } catch (error) {
@@ -457,25 +384,9 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
     if (!user) return null;
 
     try {
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${user.id}/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
-      const bucket = 'chat-media';
-
-      const { error: uploadError } = await supabase.storage
-        .from(bucket)
-        .upload(fileName, file);
-
-      if (uploadError) {
-        console.error('Upload error:', uploadError);
-        toast({ title: 'Upload failed', description: 'Failed to upload file', variant: 'destructive' });
-        return null;
-      }
-
-      const { data: { publicUrl } } = supabase.storage
-        .from(bucket)
-        .getPublicUrl(fileName);
-
-      return publicUrl;
+      // Use Cloudinary via API for chat media uploads
+      const result = await uploadApi.uploadImage(file, 'chat');
+      return result.url;
     } catch (error) {
       console.error('Error uploading media:', error);
       toast({ title: 'Error', description: 'Failed to upload media', variant: 'destructive' });
@@ -498,29 +409,32 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
         currentWs.send(JSON.stringify({ type: 'send_message', conversationId, content, messageType, mediaUrl }));
         console.log('Message sent via WebSocket');
       } else {
-        // Fallback to direct database insert
-        const { data: newMessage, error } = await supabase
-          .from('messages')
-          .insert({
-            conversation_id: conversationId,
-            sender_id: user.id,
-            content,
-            message_type: messageType,
-            media_url: mediaUrl || null
-          })
-          .select()
-          .single();
+        // Fallback to API call
+        const response = await api.post(`/users/conversations/${conversationId}/messages`, {
+          content,
+          messageType,
+          mediaUrl: mediaUrl || null
+        });
 
-        if (error) throw error;
+        const newMessage = response.data;
+        const formattedMessage: Message = {
+          id: newMessage.id,
+          conversation_id: newMessage.conversationId,
+          sender_id: newMessage.senderId,
+          content: newMessage.content,
+          message_type: newMessage.messageType,
+          media_url: newMessage.mediaUrl,
+          read_at: newMessage.readAt,
+          deleted_at: newMessage.deletedAt,
+          created_at: newMessage.createdAt
+        };
 
         setMessages(prev => ({
           ...prev,
-          [conversationId]: [...(prev[conversationId] || []), newMessage as Message].sort((a, b) =>
+          [conversationId]: [...(prev[conversationId] || []), formattedMessage].sort((a, b) =>
             new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
           )
         }));
-
-        await supabase.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', conversationId);
       }
     } catch (error) {
       console.error('Error sending message:', error);
@@ -576,7 +490,7 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
     if (!user) return;
 
     try {
-      await supabase.from('messages').update({ deleted_at: new Date().toISOString() }).eq('id', messageId).eq('sender_id', user.id);
+      await api.delete(`/users/conversations/${conversationId}/messages/${messageId}`);
 
       setMessages(prev => ({
         ...prev,
@@ -598,8 +512,7 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
     if (!user) return;
 
     try {
-      await supabase.from('messages').update({ deleted_at: new Date().toISOString() }).eq('conversation_id', conversationId);
-      await supabase.from('conversations').delete().eq('id', conversationId).or(`owner_id.eq.${user.id},leaser_id.eq.${user.id}`);
+      await api.delete(`/users/conversations/${conversationId}`);
 
       setConversations(prev => prev.filter(conv => conv.id !== conversationId));
       setMessages(prev => {
@@ -617,7 +530,7 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
     if (!user) return;
 
     try {
-      await supabase.from('conversations').update({ contact_request_status: 'approved', contact_shared: true }).eq('id', conversationId).eq('owner_id', user.id);
+      await api.post(`/users/conversations/${conversationId}/approve-contact`, { phone: ownerPhone });
       await sendMessage(conversationId, ownerPhone, 'contact');
       await loadConversations();
     } catch (error) {
@@ -629,7 +542,7 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
     if (!user) return;
 
     try {
-      await supabase.from('conversations').update({ contact_request_status: 'rejected' }).eq('id', conversationId).eq('owner_id', user.id);
+      await api.post(`/users/conversations/${conversationId}/reject-contact`);
       await loadConversations();
     } catch (error) {
       console.error('Error rejecting contact request:', error);
@@ -665,29 +578,23 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
     const pollForNewMessages = async () => {
       for (const conv of conversations) {
         try {
-          // Try with deleted_at filter first, fall back if column doesn't exist
-          let result = await supabase
-            .from('messages')
-            .select('*')
-            .eq('conversation_id', conv.id)
-            .is('deleted_at', null)
-            .order('created_at', { ascending: true });
-
-          // If error with deleted_at, try without
-          if (result.error && result.error.message?.includes('deleted_at')) {
-            result = await supabase
-              .from('messages')
-              .select('*')
-              .eq('conversation_id', conv.id)
-              .order('created_at', { ascending: true });
-          }
-
-          const dbMessages = result.data;
+          const response = await api.get(`/users/conversations/${conv.id}/messages`);
+          const dbMessages = (response.data || []).map((m: any) => ({
+            id: m.id,
+            conversation_id: m.conversationId,
+            sender_id: m.senderId,
+            content: m.content,
+            message_type: m.messageType,
+            media_url: m.mediaUrl,
+            read_at: m.readAt,
+            deleted_at: m.deletedAt,
+            created_at: m.createdAt
+          }));
 
           if (dbMessages?.length) {
             const currentMessages = messagesRef.current[conv.id] || [];
             const currentIds = new Set(currentMessages.map(m => m.id));
-            const newMessages = dbMessages.filter(m => !currentIds.has(m.id));
+            const newMessages = dbMessages.filter((m: Message) => !currentIds.has(m.id));
 
             if (newMessages.length > 0) {
               setMessages(prev => ({ ...prev, [conv.id]: dbMessages as Message[] }));

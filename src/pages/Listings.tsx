@@ -14,6 +14,7 @@ import { RatingCard } from "@/components/RatingCard";
 import { AdPopup } from "@/components/AdPopup";
 import BannerCarousel from "@/components/BannerCarousel";
 import FilterSection from "@/components/FilterSection";
+import { RentalRequestDialog } from "@/components/RentalRequestDialog";
 import { useListings, incrementViews } from "@/hooks/useListings";
 import { useAuth } from "@/contexts/AuthContext";
 import { useChat } from "@/hooks/useChat";
@@ -28,6 +29,7 @@ import {
   Tag,
   Sparkles,
   MessageCircle,
+  ShoppingBag,
 } from "lucide-react";
 import {
   Carousel,
@@ -37,7 +39,7 @@ import {
   CarouselPrevious,
 } from "@/components/ui/carousel";
 import { useDebounce } from "@/hooks/useDebounce";
-import { supabase } from "@/integrations/supabase/client";
+import api from "@/lib/api";
 import { toast } from "@/hooks/use-toast";
 
 const Listings = () => {
@@ -61,11 +63,38 @@ const Listings = () => {
   const [chatOpen, setChatOpen] = useState(false);
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
   const [otherUserProfile, setOtherUserProfile] = useState<any>(null);
+  const [rentalDialogOpen, setRentalDialogOpen] = useState(false);
+  const [rentalListing, setRentalListing] = useState<any>(null);
   // const [testLoading] = useState(true);
 
   const handleViewListing = (listing: any) => {
     incrementViews(listing.id);
     setSelectedListing(listing);
+  };
+
+  const handleRequestRental = (listing: any) => {
+    if (!user) {
+      toast({
+        title: "Login Required",
+        description: "Please login to request a rental",
+        variant: "destructive"
+      });
+      navigate("/login");
+      return;
+    }
+
+    // Check if user is the owner
+    if (listing.owner_user_id === user.id) {
+      toast({
+        title: "Cannot rent your own item",
+        description: "You cannot request to rent your own listing",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    setRentalListing(listing);
+    setRentalDialogOpen(true);
   };
 
   const handleStartChat = async () => {
@@ -115,14 +144,10 @@ const Listings = () => {
           // Fallback: try to fetch profile, but handle errors gracefully
           const otherUserId = isOwner ? conversation.leaser_id : conversation.owner_id;
           try {
-            const { data, error } = await supabase
-              .from('profiles')
-              .select('name, avatar_url')
-              .eq('id', otherUserId)
-              .maybeSingle();
-            
-            if (!error && data) {
-              profile = data;
+            const response = await api.get(`/users/${otherUserId}/profile`);
+            const data = response.data;
+            if (data) {
+              profile = { name: data.name, avatar_url: data.avatarUrl };
             }
           } catch (err) {
             console.error('Error fetching profile:', err);
@@ -231,50 +256,43 @@ const Listings = () => {
       }
       setNearbyLoading(true);
       try {
-        // Cast to any to allow calling custom RPC without generated types
-        const { data: rpcData, error: rpcError } = await (supabase.rpc as any)('get_nearby_listings', {
-          user_lat: userLat,
-          user_lng: userLng,
-          radius_meters: radiusMeters
+        // Try to fetch nearby listings via API
+        const response = await api.get('/listings/nearby', {
+          params: {
+            lat: userLat,
+            lng: userLng,
+            radius: radiusMeters
+          }
         });
-        
-        if (rpcError) {
-          console.error('RPC error:', rpcError);
-          throw rpcError;
-        }
-        
-        const rpcRows: any[] = Array.isArray(rpcData) ? rpcData : [];
-        console.log('RPC returned', rpcRows.length, 'nearby listings');
-        
+
+        const rpcRows: any[] = Array.isArray(response.data) ? response.data : [];
+        console.log('API returned', rpcRows.length, 'nearby listings');
+
         if (rpcRows.length === 0) {
-          // RPC returned empty - this is normal if no listings in radius or RPC not available
-          // Silently fall through to client-side fallback
-          console.log('RPC returned no results, using client-side fallback');
+          // API returned empty - fall through to client-side fallback
+          console.log('API returned no results, using client-side fallback');
         } else {
-          // RPC succeeded, process results
-          const ids = rpcRows.map((r: any) => r.id);
+          // API succeeded, process results
           const distanceMap: Record<string, number> = {};
-          rpcRows.forEach((r: any) => { distanceMap[r.id] = r.distance_meters; });
+          rpcRows.forEach((r: any) => { distanceMap[r.id] = r.distanceMeters || r.distance_meters; });
           setDistanceById(distanceMap);
-          
-          const { data: fullRows, error: selError } = await supabase
-            .from('listings')
-            .select('*')
-            .in('id', ids);
-          if (selError) throw selError;
-          
-          // Preserve RPC order by distance
-          const orderIndex: Record<string, number> = {};
-          ids.forEach((id: string, i: number) => { orderIndex[id] = i; });
-          const ordered = (fullRows || []).slice().sort((a: any, b: any) => orderIndex[a.id] - orderIndex[b.id]);
+
+          // Transform camelCase to snake_case for component compatibility
+          const ordered = rpcRows.map((r: any) => ({
+            ...r,
+            product_name: r.productName || r.product_name,
+            rent_price: r.rentPrice || r.rent_price,
+            pin_code: r.pinCode || r.pin_code,
+            owner_user_id: r.ownerUserId || r.owner_user_id,
+          }));
           setNearbyListings(ordered);
-          console.log('Nearby listings set from RPC:', ordered.length);
+          console.log('Nearby listings set from API:', ordered.length);
           setNearbyLoading(false);
-          return; // Exit early if RPC succeeded
+          return; // Exit early if API succeeded
         }
-        
+
       } catch (e) {
-        console.warn('RPC error, using client-side fallback:', e);
+        console.warn('API error, using client-side fallback:', e);
       }
       
       // Fallback: compute nearby client-side from all approved listings
@@ -814,26 +832,49 @@ const Listings = () => {
                     </div>
                   </div>
 
-                  {/* Chat Card */}
-                  <div className="p-5 rounded-2xl bg-gradient-to-r from-[#F5F3F4] to-[#D3D3D3]/40 border border-[#B1A7A6]/20 shadow-inner space-y-3">
-                    <h3 className="font-semibold text-lg text-[#161A1D]">
-                      Contact Owner
-                    </h3>
-                    <p className="text-sm text-[#660708]/70">
-                      Start a conversation with the owner to discuss this listing
-                    </p>
-                    <Button 
-                      onClick={handleStartChat}
-                      className="w-full bg-gradient-to-r from-[#E5383B] via-[#BA181B] to-[#660708] hover:opacity-90 text-white rounded-xl py-2 font-medium shadow-md transition-all duration-300 flex items-center justify-center gap-2"
-                    >
-                      <MessageCircle size={18} />
-                      {existingConversation ? "Open Chat" : "Start Chat"}
-                    </Button>
-                    {existingConversation && (
-                      <p className="text-xs text-[#660708]/60 text-center">
-                        You have an existing conversation
-                      </p>
+                  {/* Action Cards */}
+                  <div className="space-y-4">
+                    {/* Request to Rent Card */}
+                    {selectedListing.product_type !== 'sale' && (
+                      <div className="p-5 rounded-2xl bg-gradient-to-r from-[#E5383B]/10 to-[#BA181B]/10 border border-[#E5383B]/30 shadow-inner space-y-3">
+                        <h3 className="font-semibold text-lg text-[#161A1D]">
+                          Request to Rent
+                        </h3>
+                        <p className="text-sm text-[#660708]/70">
+                          Submit a rental request with identity verification
+                        </p>
+                        <Button
+                          onClick={() => handleRequestRental(selectedListing)}
+                          className="w-full bg-gradient-to-r from-[#E5383B] via-[#BA181B] to-[#660708] hover:opacity-90 text-white rounded-xl py-2 font-medium shadow-md transition-all duration-300 flex items-center justify-center gap-2"
+                        >
+                          <ShoppingBag size={18} />
+                          Request to Rent
+                        </Button>
+                      </div>
                     )}
+
+                    {/* Chat Card */}
+                    <div className="p-5 rounded-2xl bg-gradient-to-r from-[#F5F3F4] to-[#D3D3D3]/40 border border-[#B1A7A6]/20 shadow-inner space-y-3">
+                      <h3 className="font-semibold text-lg text-[#161A1D]">
+                        Contact Owner
+                      </h3>
+                      <p className="text-sm text-[#660708]/70">
+                        Start a conversation with the owner to discuss this listing
+                      </p>
+                      <Button
+                        onClick={handleStartChat}
+                        variant="outline"
+                        className="w-full border-2 border-[#E5383B] text-[#660708] hover:bg-[#E5383B] hover:text-white rounded-xl py-2 font-medium shadow-md transition-all duration-300 flex items-center justify-center gap-2"
+                      >
+                        <MessageCircle size={18} />
+                        {existingConversation ? "Open Chat" : "Start Chat"}
+                      </Button>
+                      {existingConversation && (
+                        <p className="text-xs text-[#660708]/60 text-center">
+                          You have an existing conversation
+                        </p>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -880,6 +921,26 @@ const Listings = () => {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Rental Request Dialog */}
+      {rentalListing && (
+        <RentalRequestDialog
+          listing={rentalListing}
+          isOpen={rentalDialogOpen}
+          onClose={() => {
+            setRentalDialogOpen(false);
+            setRentalListing(null);
+          }}
+          onRequestCreated={() => {
+            setSelectedListing(null);
+            toast({
+              title: "Request Submitted!",
+              description: "Your rental request has been sent to the owner for approval.",
+            });
+          }}
+        />
+      )}
+
       <style>{`
       @keyframes float {
             0%, 100% { transform: translate(0, 0) scale(1); }

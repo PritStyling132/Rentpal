@@ -10,10 +10,12 @@ import AboutPage from "./pages/AboutPage";
 import Landing from "./pages/Landing";
 import Signup from "./pages/Signup";
 import Login from "./pages/Login";
+import RoleSelection from "./pages/RoleSelection";
 import Listings from "./pages/Listings";
 import SubmitListing from "./pages/SubmitListing";
 import Profile from "./pages/Profile";
 import AdminDashboard from "./pages/AdminDashboard";
+import OwnerDashboard from "./pages/OwnerDashboard";
 import Blog from "./pages/Blog";
 import BlogPost from "./pages/BlogPost";
 import BlogManagement from "./pages/BlogManagement";
@@ -50,12 +52,21 @@ const App = () => (
           <NotificationBanner />
           <Routes>
             <Route path="/" element={<Landing />} />
+            {/* Role Selection & Auth Routes */}
+            <Route path="/get-started" element={<RoleSelection />} />
             <Route path="/signup" element={<Signup />} />
             <Route path="/login" element={<Login />} />
+
+            {/* Main Routes */}
             <Route path="/listings" element={<Listings />} />
             <Route path="/submit-listing" element={<SubmitListing />} />
             <Route path="/profile" element={<Profile />} />
             <Route path="/inbox" element={<Inbox />} />
+
+            {/* Owner Routes */}
+            <Route path="/owner-dashboard" element={<OwnerDashboard />} />
+
+            {/* Admin Routes */}
             <Route path="/admin" element={<AdminDashboard />} />
             <Route path="/admin/blogs" element={<BlogManagement />} />
             <Route path="/admin/ad-editor" element={<AdEditor />} />
@@ -66,10 +77,11 @@ const App = () => (
             <Route path="/admin/notifications" element={<NotificationManagement />} />
             <Route path="/admin/coupons" element={<CouponManagement />} />
             <Route path="/manage-packages" element={<PackageManagement />} />
+
+            {/* Public Routes */}
             <Route path="/leaderboard" element={<Leaderboard />} />
             <Route  path="/about" element={<AboutPage />} />
             <Route path="/blog" element={<Blog />} />
-
             <Route path="/terms-and-conditions" element={<TermsAndConditionPage />} />
             <Route path="/blog/:id" element={<BlogPost />} />
             <Route path="/auth/callback" element={<OAuthCallback />} />

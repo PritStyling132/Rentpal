@@ -8,10 +8,10 @@ import StatsCardsOnProfile from '@/components/StatsCardsOnProfile';
 import DashboardHero from '@/components/DashboardHeroOnProfile';
 import { ProfileEditDialog } from '@/components/ProfileEditDialog';
 import { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { usersApi } from '@/lib/api';
 
 const Profile = () => {
-  const { user, authReady } = useAuth();
+  const { user, profile, authReady } = useAuth();
   const navigate = useNavigate();
   const listingsEnabled = Boolean(user?.id) && Boolean(authReady);
   const { listings, loading } = useListings(undefined, user?.id, listingsEnabled);
@@ -21,22 +21,26 @@ const Profile = () => {
   const [userName, setUserName] = useState<string>('');
 
   useEffect(() => {
-    if (user?.id) {
-      supabase
-        .from('profiles')
-        .select('avatar_url, name')
-        .eq('id', user.id)
-        .single()
-        .then(({ data }) => {
-          if (data?.avatar_url) {
-            setAvatarUrl(data.avatar_url);
-          }
-          if (data?.name) {
-            setUserName(data.name);
-          }
-        });
+    // Use profile from auth context if available
+    if (profile) {
+      if (profile.avatarUrl) {
+        setAvatarUrl(profile.avatarUrl);
+      }
+      if (profile.name) {
+        setUserName(profile.name);
+      }
+    } else if (user?.id) {
+      // Fallback to API call
+      usersApi.getProfile(user.id).then((data) => {
+        if (data?.avatarUrl) {
+          setAvatarUrl(data.avatarUrl);
+        }
+        if (data?.name) {
+          setUserName(data.name);
+        }
+      }).catch(console.error);
     }
-  }, [user?.id]);
+  }, [user?.id, profile]);
 
   if (!user) return null;
 

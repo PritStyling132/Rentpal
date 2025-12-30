@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
+import api from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -31,36 +31,22 @@ const TopProfilesManagement = () => {
   const { data: profiles, isLoading } = useQuery({
     queryKey: ['admin-top-profiles'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('top_profiles')
-        .select('*')
-        .order('display_order', { ascending: true });
-      if (error) throw error;
-      return data;
+      const response = await api.get('/admin/top-profiles');
+      return response.data || [];
     },
   });
 
   const { data: visibility } = useQuery({
     queryKey: ['section-visibility', 'top_profiles'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('section_visibility')
-        .select('*')
-        .eq('section_name', 'top_profiles')
-        .single();
-      if (error) throw error;
-      return data;
+      const response = await api.get('/admin/section-visibility/top_profiles');
+      return response.data;
     },
   });
 
   const toggleVisibility = useMutation({
     mutationFn: async (isVisible: boolean) => {
-      const { data: { user } } = await supabase.auth.getUser();
-      const { error } = await supabase
-        .from('section_visibility')
-        .update({ is_visible: isVisible, updated_by: user?.id })
-        .eq('section_name', 'top_profiles');
-      if (error) throw error;
+      await api.put('/admin/section-visibility/top_profiles', { isVisible });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['section-visibility'] });
@@ -70,19 +56,10 @@ const TopProfilesManagement = () => {
 
   const saveProfile = useMutation({
     mutationFn: async (profile: any) => {
-      const { data: { user } } = await supabase.auth.getUser();
-      
       if (editingProfile) {
-        const { error } = await supabase
-          .from('top_profiles')
-          .update({ ...profile, created_by: user?.id })
-          .eq('id', editingProfile.id);
-        if (error) throw error;
+        await api.put(`/admin/top-profiles/${editingProfile.id}`, profile);
       } else {
-        const { error } = await supabase
-          .from('top_profiles')
-          .insert([{ ...profile, user_id: user?.id, created_by: user?.id }]);
-        if (error) throw error;
+        await api.post('/admin/top-profiles', profile);
       }
     },
     onSuccess: () => {
@@ -95,11 +72,7 @@ const TopProfilesManagement = () => {
 
   const deleteProfile = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase
-        .from('top_profiles')
-        .delete()
-        .eq('id', id);
-      if (error) throw error;
+      await api.delete(`/admin/top-profiles/${id}`);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin-top-profiles'] });

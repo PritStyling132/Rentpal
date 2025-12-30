@@ -1,25 +1,31 @@
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
+import { usersApi } from '@/lib/api';
 
-export const useLeaderboard = (limit = 50, offset = 0) => {
+export interface LeaderboardEntry {
+  id: string;
+  profileId: string;
+  rank: number;
+  score: number;
+  category?: string | null;
+  profile?: {
+    id: string;
+    name: string;
+    avatarUrl?: string | null;
+    userType?: string;
+  };
+}
+
+export const useLeaderboard = () => {
   return useQuery({
-    queryKey: ['leaderboard', limit, offset],
+    queryKey: ['leaderboard'],
     queryFn: async () => {
-      // Query from the leaderboard view instead of profiles table directly
-      // This view only exposes non-sensitive columns (no phone/pin_code)
-      const { data, error } = await supabase
-        .from('leaderboard')
-        .select('*')
-        .range(offset, offset + limit - 1);
+      const response = await usersApi.getLeaderboard();
+      if (!response.data.success) throw new Error(response.data.error);
 
-      if (error) throw error;
-      
+      const data = response.data.data as LeaderboardEntry[];
       return {
-        data: data?.map((user, index) => ({
-          ...user,
-          rank: offset + index + 1
-        })) || [],
-        total: data?.length || 0
+        data: data || [],
+        total: data?.length || 0,
       };
     },
   });
@@ -29,14 +35,14 @@ export const useUserStreak = (userId: string) => {
   return useQuery({
     queryKey: ['user-streak', userId],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('current_streak, longest_streak, last_active_at')
-        .eq('id', userId)
-        .single();
-
-      if (error) throw error;
-      return data;
+      const response = await usersApi.getProfile(userId);
+      if (!response.data.success) throw new Error(response.data.error);
+      const profile = response.data.data;
+      return {
+        currentStreak: profile?.currentStreak || 0,
+        longestStreak: profile?.longestStreak || 0,
+        lastActiveAt: profile?.lastActiveAt || null,
+      };
     },
     enabled: !!userId,
   });

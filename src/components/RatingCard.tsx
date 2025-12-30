@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
-import { supabase } from '@/integrations/supabase/client';
+import api from '@/lib/api';
 
 interface Rating {
   id: string;
@@ -28,13 +28,21 @@ export const RatingCard = ({ listingId, currentUserId }: RatingCardProps) => {
   const { toast } = useToast();
 
   const fetchRatings = async () => {
-    const { data, error } = await supabase
-      .from('ratings')
-      .select('*')
-      .eq('listing_id', listingId)
-      .order('created_at', { ascending: false });
-
-    if (!error && data) setRatings(data);
+    try {
+      const response = await api.get(`/listings/${listingId}/ratings`);
+      const data = response.data || [];
+      // Transform camelCase to snake_case for component compatibility
+      const transformed = data.map((r: any) => ({
+        id: r.id,
+        user_id: r.userId,
+        rating: r.rating,
+        comment: r.comment,
+        created_at: r.createdAt,
+      }));
+      setRatings(transformed);
+    } catch (error) {
+      console.error('Error fetching ratings:', error);
+    }
   };
 
   const handleSubmitRating = async () => {
@@ -57,20 +65,11 @@ export const RatingCard = ({ listingId, currentUserId }: RatingCardProps) => {
     }
 
     setLoading(true);
-    const { error } = await supabase.from('ratings').upsert({
-      listing_id: listingId,
-      user_id: currentUserId,
-      rating: userRating,
-      comment: userComment || null,
-    });
-
-    if (error) {
-      toast({
-        title: 'Error',
-        description: 'Failed to submit rating',
-        variant: 'destructive',
+    try {
+      await api.post(`/listings/${listingId}/ratings`, {
+        rating: userRating,
+        comment: userComment || null,
       });
-    } else {
       toast({
         title: 'Success',
         description: 'Rating submitted successfully',
@@ -78,13 +77,19 @@ export const RatingCard = ({ listingId, currentUserId }: RatingCardProps) => {
       setUserRating(0);
       setUserComment('');
       fetchRatings();
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: 'Failed to submit rating',
+        variant: 'destructive',
+      });
     }
     setLoading(false);
   };
 
   useEffect(() => {
     fetchRatings();
-  }, []);
+  }, [listingId]);
 
   const averageRating =
     ratings.length > 0
@@ -93,7 +98,7 @@ export const RatingCard = ({ listingId, currentUserId }: RatingCardProps) => {
 
   return (
     <Card
-      className="mt-10 border border-[#B1A7A6]/30 rounded-3xl overflow-hidden 
+      className="mt-10 border border-[#B1A7A6]/30 rounded-3xl overflow-hidden
       bg-gradient-to-br from-[#F5F3F4] via-[#FFFFFF] to-[#F5F3F4]
       shadow-[0_8px_24px_rgba(102,7,8,0.08)] hover:shadow-[0_10px_28px_rgba(102,7,8,0.15)]
       transition-all duration-500 backdrop-blur-md"
@@ -146,7 +151,7 @@ export const RatingCard = ({ listingId, currentUserId }: RatingCardProps) => {
             <Button
               onClick={handleSubmitRating}
               disabled={loading}
-              className="bg-gradient-to-r from-[#BA181B] via-[#E5383B] to-[#A4161A] 
+              className="bg-gradient-to-r from-[#BA181B] via-[#E5383B] to-[#A4161A]
               text-white rounded-xl shadow-md hover:shadow-[0_0_20px_rgba(229,56,59,0.3)]
               transition-all duration-300 px-6 py-2 font-semibold tracking-wide"
             >
@@ -164,8 +169,8 @@ export const RatingCard = ({ listingId, currentUserId }: RatingCardProps) => {
             ratings.map((rating) => (
               <div
                 key={rating.id}
-                className="p-5 rounded-2xl border border-[#D3D3D3]/60 bg-[#F5F3F4]/70 
-                hover:bg-[#E9E9E9]/80 hover:border-[#E5383B]/40 
+                className="p-5 rounded-2xl border border-[#D3D3D3]/60 bg-[#F5F3F4]/70
+                hover:bg-[#E9E9E9]/80 hover:border-[#E5383B]/40
                 transition-all duration-300 group shadow-sm"
               >
                 <div className="flex items-center gap-2 mb-3">

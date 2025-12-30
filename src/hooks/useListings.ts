@@ -1,30 +1,40 @@
 import { useState, useEffect, useCallback } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { listingsApi, adminApi } from '@/lib/api';
 
 export interface Listing {
   id: string;
-  owner_user_id: string;
-  product_name: string;
+  ownerId: string;
+  productName: string;
   description: string;
   images: string[];
-  rent_price: number;
-  pin_code: string;
+  pricePerDay: number;
+  pricePerWeek?: number | null;
+  pricePerMonth?: number | null;
+  securityDeposit?: number | null;
+  pinCode: string | null;
+  address?: string | null;
+  city?: string | null;
+  state?: string | null;
   availability: boolean;
-  payment_transaction: string;
-  payment_verified: boolean;
-  listing_status: string;
+  availableFrom?: string | null;
+  availableTo?: string | null;
+  status: string;
   views: number;
-  rating: number | null;
-  product_type: 'rent' | 'sale' | 'both';
+  productType: 'rent' | 'sale' | 'both';
   category: string;
-  phone: string;
-  address: string;
-  created_at: string;
-  listing_type?: string | null;
-  coupon_code?: string;
-  original_price?: number;
-  discount_amount?: number;
-  final_price?: number;
+  condition?: string | null;
+  brand?: string | null;
+  model?: string | null;
+  features: string[];
+  rules: string[];
+  createdAt: string;
+  updatedAt: string;
+  owner?: {
+    id: string;
+    name: string;
+    avatarUrl?: string | null;
+    userType?: string;
+  };
 }
 
 export const useListings = (status?: string, userId?: string, enabled: boolean = true) => {
@@ -37,21 +47,21 @@ export const useListings = (status?: string, userId?: string, enabled: boolean =
     }
     setLoading(true);
     try {
-      let query = supabase.from('listings').select('*');
-      
+      const params: Record<string, string | number | undefined> = {};
+
       if (status) {
-        query = query.eq('listing_status', status);
+        params.status = status;
       }
-      
+
       if (userId) {
-        query = query.eq('owner_user_id', userId);
+        params.ownerId = userId;
       }
-      
-      const { data, error } = await query.order('created_at', { ascending: false });
-      
-      if (error) throw error;
-      
-      setListings(data || []);
+
+      const response = await listingsApi.getListings(params);
+
+      if (response.data.success) {
+        setListings(response.data.data || []);
+      }
     } catch (error) {
       console.error('Error fetching listings:', error);
     } finally {
@@ -67,27 +77,31 @@ export const useListings = (status?: string, userId?: string, enabled: boolean =
 };
 
 export const approveListing = async (listingId: string) => {
-  const { error } = await supabase
-    .from('listings')
-    .update({ listing_status: 'approved', payment_verified: true })
-    .eq('id', listingId);
-  
-  return !error;
+  try {
+    const response = await adminApi.updateListingStatus(listingId, 'approved');
+    return response.data.success;
+  } catch (error) {
+    console.error('Error approving listing:', error);
+    return false;
+  }
 };
 
-export const rejectListing = async (listingId: string) => {
-  const { error } = await supabase
-    .from('listings')
-    .update({ listing_status: 'rejected' })
-    .eq('id', listingId);
-  
-  return !error;
+export const rejectListing = async (listingId: string, reason?: string) => {
+  try {
+    const response = await adminApi.updateListingStatus(listingId, 'rejected', reason);
+    return response.data.success;
+  } catch (error) {
+    console.error('Error rejecting listing:', error);
+    return false;
+  }
 };
 
 export const incrementViews = async (listingId: string) => {
-  const { error } = await supabase.rpc('increment_listing_views', {
-    listing_id: listingId,
-  });
-  
-  return !error;
+  try {
+    const response = await listingsApi.incrementViews(listingId);
+    return response.data.success;
+  } catch (error) {
+    console.error('Error incrementing views:', error);
+    return false;
+  }
 };

@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Card } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
-import { supabase } from '@/integrations/supabase/client';
+import api from '@/lib/api';
 import { toast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 import { Loader2, ArrowLeft } from 'lucide-react';
@@ -26,15 +26,8 @@ const TermsManagement = () => {
 
     const fetchCurrentTerms = async () => {
       try {
-        const { data, error } = await supabase
-          .from('terms_and_conditions')
-          .select('content')
-          .eq('active', true)
-          .order('version', { ascending: false })
-          .limit(1)
-          .single();
-
-        if (error) throw error;
+        const response = await api.get('/admin/terms');
+        const data = response.data;
         if (data) {
           setContent(data.content);
         }
@@ -55,37 +48,11 @@ const TermsManagement = () => {
     try {
       // Validate content
       const validatedData = termsSchema.parse({ content });
-      
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not authenticated');
 
-      // Deactivate all current terms
-      await supabase
-        .from('terms_and_conditions')
-        .update({ active: false })
-        .eq('active', true);
-
-      // Get the latest version
-      const { data: latestVersion } = await supabase
-        .from('terms_and_conditions')
-        .select('version')
-        .order('version', { ascending: false })
-        .limit(1)
-        .single();
-
-      const newVersion = latestVersion ? latestVersion.version + 1 : 1;
-
-      // Insert new terms
-      const { error } = await supabase
-        .from('terms_and_conditions')
-        .insert({
-          content: validatedData.content,
-          version: newVersion,
-          active: true,
-          created_by: user.id,
-        });
-
-      if (error) throw error;
+      // Update terms via API
+      await api.post('/admin/terms', {
+        content: validatedData.content,
+      });
 
       toast({
         title: 'Success',

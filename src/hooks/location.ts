@@ -1,11 +1,6 @@
 // utils/location.ts
 import ngeohash from 'ngeohash';
-import { createClient } from '@supabase/supabase-js';
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+import api from '@/lib/api';
 
 type GeocodeResult = {
   lat: number;
@@ -67,37 +62,28 @@ export async function insertListing(listing: {
 
   const geohash = ngeohash.encode(geo.lat, geo.lon, 9);
 
-  const { data, error } = await supabase
-    .from('listings')
-    .insert([
-      {
-        owner_user_id: listing.owner_user_id,
-        product_name: listing.product_name,
-        description: listing.description,
-        category: listing.category,
-        pin_code: listing.pin_code,
-        phone: listing.phone,
-        address: listing.address,
-        rent_price: listing.rent_price,
-        original_price: listing.original_price,
-        discount_amount: listing.discount_amount,
-        final_price: listing.final_price,
-        product_type: listing.product_type,
-        package_id: listing.package_id,
-        listing_type: listing.listing_type,
+  const response = await api.post('/listings', {
+    ownerUserId: listing.owner_user_id,
+    productName: listing.product_name,
+    description: listing.description,
+    category: listing.category,
+    pinCode: listing.pin_code,
+    phone: listing.phone,
+    address: listing.address,
+    rentPrice: listing.rent_price,
+    originalPrice: listing.original_price,
+    discountAmount: listing.discount_amount,
+    finalPrice: listing.final_price,
+    productType: listing.product_type,
+    packageId: listing.package_id,
+    listingType: listing.listing_type,
+    latitude: geo.lat,
+    longitude: geo.lon,
+    city: geo.city,
+    state: geo.state,
+    locality: geo.locality,
+    geohash
+  });
 
-        latitude: geo.lat,
-        longitude: geo.lon,
-        city: geo.city,
-        state: geo.state,
-        locality: geo.locality,
-
-        geohash // optional; DB also generates geohash9
-      }
-    ])
-    .select()
-    .single();
-
-  if (error) throw error;
-  return data;
+  return response.data;
 }

@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import { Upload, X, Image as ImageIcon, Loader2 } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
+import { uploadApi } from '@/lib/api';
 import { toast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 
@@ -36,10 +36,10 @@ export const ImageUpload = ({ onImagesUploaded, currentImages = [], userId, maxI
         });
         return false;
       }
-      if (file.size > 5 * 1024 * 1024) {
+      if (file.size > 10 * 1024 * 1024) {
         toast({
           title: "File too large",
-          description: `${file.name} exceeds 5MB limit`,
+          description: `${file.name} exceeds 10MB limit`,
           variant: "destructive",
         });
         return false;
@@ -61,24 +61,10 @@ export const ImageUpload = ({ onImagesUploaded, currentImages = [], userId, maxI
     setIsUploading(true);
 
     try {
-      const uploadPromises = validFiles.map(async (file) => {
-        const fileExt = file.name.split('.').pop();
-        const fileName = `${userId}/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
+      // Upload multiple images via Cloudinary
+      const result = await uploadApi.uploadImages(validFiles, 'listings');
+      const uploadedUrls = result.map((r: any) => r.url);
 
-        const { error: uploadError } = await supabase.storage
-          .from('listing-images')
-          .upload(fileName, file);
-
-        if (uploadError) throw uploadError;
-
-        const { data: { publicUrl } } = supabase.storage
-          .from('listing-images')
-          .getPublicUrl(fileName);
-
-        return publicUrl;
-      });
-
-      const uploadedUrls = await Promise.all(uploadPromises);
       const newPreviews = [...previews, ...uploadedUrls];
       setPreviews(newPreviews);
       onImagesUploaded(newPreviews);
@@ -113,10 +99,19 @@ export const ImageUpload = ({ onImagesUploaded, currentImages = [], userId, maxI
     e.target.value = ''; // Reset input to allow re-uploading same files
   };
 
-  const handleRemove = (index: number) => {
+  const handleRemove = async (index: number) => {
+    const urlToRemove = previews[index];
     const newPreviews = previews.filter((_, i) => i !== index);
     setPreviews(newPreviews);
     onImagesUploaded(newPreviews);
+
+    // Optionally delete from Cloudinary (fire and forget)
+    try {
+      await uploadApi.deleteByUrl(urlToRemove);
+    } catch (error) {
+      // Silently fail - image is already removed from UI
+      console.error('Failed to delete image from storage:', error);
+    }
   };
 
   return (
@@ -141,7 +136,7 @@ export const ImageUpload = ({ onImagesUploaded, currentImages = [], userId, maxI
           ))}
         </div>
       )}
-      
+
       {previews.length < maxImages && (
         <div
           onDragOver={handleDragOver}
@@ -161,7 +156,7 @@ export const ImageUpload = ({ onImagesUploaded, currentImages = [], userId, maxI
             disabled={isUploading}
             className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
           />
-          
+
           <div className="flex flex-col items-center justify-center text-center space-y-4">
             {isUploading ? (
               <>
@@ -178,7 +173,7 @@ export const ImageUpload = ({ onImagesUploaded, currentImages = [], userId, maxI
                     Drag & drop your images here
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    or click to browse ({previews.length}/{maxImages} images, max 5MB each)
+                    or click to browse ({previews.length}/{maxImages} images, max 10MB each)
                   </p>
                 </div>
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">

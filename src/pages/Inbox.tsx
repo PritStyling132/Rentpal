@@ -35,7 +35,6 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Input } from '@/components/ui/input';
 import { formatDistanceToNow } from 'date-fns';
-import { supabase } from '@/integrations/supabase/client';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 const Inbox = () => {
@@ -58,67 +57,22 @@ const Inbox = () => {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [conversationToDelete, setConversationToDelete] = useState<string | null>(null);
 
-  // Calculate unread counts - fetch from database to ensure accuracy
+  // Calculate unread counts from local messages state
   useEffect(() => {
     if (!user || !conversations.length) {
       setUnreadCounts({});
       return;
     }
 
-    const calculateUnread = async () => {
-      const counts: Record<string, number> = {};
-      
-      try {
-        // Get all conversation IDs
-        const convIds = conversations.map(c => c.id);
-        
-        // Fetch unread counts from database for accuracy
-        // Get all messages in these conversations that are unread and not from the current user
-        const { data: unreadData, error } = await supabase
-          .from('messages')
-          .select('conversation_id')
-          .in('conversation_id', convIds)
-          .is('read_at', null)
-          .is('deleted_at', null)
-          .neq('sender_id', user.id);
-        
-        if (error) {
-          console.error('Error fetching unread counts:', error);
-          // Fallback to local calculation
-          for (const conv of conversations) {
-            const convMessages = messages[conv.id] || [];
-            const unread = convMessages.filter(
-              (m: any) => m.sender_id !== user.id && !m.read_at && !m.deleted_at
-            ).length;
-            counts[conv.id] = unread;
-          }
-        } else {
-          // Count unread messages per conversation
-          const unreadMap = new Map<string, number>();
-          (unreadData || []).forEach((msg: any) => {
-            unreadMap.set(msg.conversation_id, (unreadMap.get(msg.conversation_id) || 0) + 1);
-          });
-          
-          conversations.forEach(conv => {
-            counts[conv.id] = unreadMap.get(conv.id) || 0;
-          });
-        }
-      } catch (error) {
-        console.error('Error calculating unread counts:', error);
-        // Fallback to local calculation
-        for (const conv of conversations) {
-          const convMessages = messages[conv.id] || [];
-          const unread = convMessages.filter(
-            (m: any) => m.sender_id !== user.id && !m.read_at && !m.deleted_at
-          ).length;
-          counts[conv.id] = unread;
-        }
-      }
-      
-      setUnreadCounts(counts);
-    };
-
-    calculateUnread();
+    const counts: Record<string, number> = {};
+    for (const conv of conversations) {
+      const convMessages = messages[conv.id] || [];
+      const unread = convMessages.filter(
+        (m: any) => m.sender_id !== user.id && !m.read_at && !m.deleted_at
+      ).length;
+      counts[conv.id] = unread;
+    }
+    setUnreadCounts(counts);
   }, [conversations, messages, user]);
 
   // Load conversations on mount
@@ -131,41 +85,14 @@ const Inbox = () => {
   const handleOpenChat = async (conversation: any) => {
     setSelectedConversation(conversation);
     joinConversation(conversation.id);
-    
-    // Mark all messages in this conversation as read
-    try {
-      const { data: convMessages } = await supabase
-        .from('messages')
-        .select('id')
-        .eq('conversation_id', conversation.id)
-        .neq('sender_id', user?.id)
-        .is('read_at', null)
-        .is('deleted_at', null);
-      
-      if (convMessages && convMessages.length > 0) {
-        await supabase
-          .from('messages')
-          .update({ read_at: new Date().toISOString() })
-          .in('id', convMessages.map(m => m.id));
-      }
-    } catch (error) {
-      console.error('Error marking messages as read:', error);
-    }
-    
+
+    // Messages will be marked as read by the chat handler
     // Fetch listing phone if user is owner and needs to approve contact
     if (conversation.owner_id === user?.id && conversation.contact_request_status === 'pending') {
-      try {
-        const { data } = await supabase
-          .from('listings')
-          .select('phone')
-          .eq('id', conversation.listing_id)
-          .single();
-        setListingPhone(data?.phone);
-      } catch (error) {
-        console.error('Error fetching listing phone:', error);
-      }
+      // Phone will be provided through the chat context if needed
+      setListingPhone(conversation.listing?.phone);
     }
-    
+
     setChatOpen(true);
   };
 

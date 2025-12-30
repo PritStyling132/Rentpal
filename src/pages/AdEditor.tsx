@@ -9,7 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Navbar } from '@/components/Navbar';
 import { useAuth } from '@/contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '@/integrations/supabase/client';
+import api, { uploadApi } from '@/lib/api';
 import { toast } from '@/hooks/use-toast';
 import { Trash2, Plus, Edit, Upload } from 'lucide-react';
 
@@ -72,41 +72,50 @@ const AdEditor = () => {
   }, [user, isAdmin, navigate]);
 
   const fetchBanners = async () => {
-    const { data } = await supabase
-      .from('banners')
-      .select('*')
-      .order('display_order', { ascending: true });
-    
-    if (data) setBanners(data);
+    try {
+      const response = await api.get('/admin/banners');
+      const data = response.data || [];
+      // Transform camelCase to snake_case
+      const transformed = data.map((b: any) => ({
+        id: b.id,
+        title: b.title,
+        image_url: b.imageUrl,
+        link_url: b.linkUrl,
+        active: b.active,
+        display_order: b.displayOrder,
+      }));
+      setBanners(transformed);
+    } catch (error) {
+      console.error('Error fetching banners:', error);
+    }
   };
 
   const fetchAds = async () => {
-    const { data } = await supabase
-      .from('ads')
-      .select('*')
-      .order('created_at', { ascending: false });
-    
-    if (data) setAds(data);
+    try {
+      const response = await api.get('/admin/ads');
+      const data = response.data || [];
+      // Transform camelCase to snake_case
+      const transformed = data.map((a: any) => ({
+        id: a.id,
+        title: a.title,
+        description: a.description,
+        image_url: a.imageUrl,
+        video_url: a.videoUrl,
+        link_url: a.linkUrl,
+        display_duration: a.displayDuration,
+        active: a.active,
+      }));
+      setAds(transformed);
+    } catch (error) {
+      console.error('Error fetching ads:', error);
+    }
   };
 
   const handleBannerImageUpload = async (file: File) => {
     setLoading(true);
     try {
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${Math.random()}.${fileExt}`;
-      const filePath = `${user?.id}/${fileName}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from('ad-content')
-        .upload(filePath, file);
-
-      if (uploadError) throw uploadError;
-
-      const { data: { publicUrl } } = supabase.storage
-        .from('ad-content')
-        .getPublicUrl(filePath);
-
-      setBannerForm({ ...bannerForm, image_url: publicUrl });
+      const result = await uploadApi.uploadImage(file, 'banners');
+      setBannerForm({ ...bannerForm, image_url: result.url });
       toast({ title: "Image uploaded successfully" });
     } catch (error) {
       console.error('Upload error:', error);
@@ -119,21 +128,8 @@ const AdEditor = () => {
   const handleAdImageUpload = async (file: File) => {
     setLoading(true);
     try {
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${Math.random()}.${fileExt}`;
-      const filePath = `${user?.id}/${fileName}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from('ad-content')
-        .upload(filePath, file);
-
-      if (uploadError) throw uploadError;
-
-      const { data: { publicUrl } } = supabase.storage
-        .from('ad-content')
-        .getPublicUrl(filePath);
-
-      setAdForm({ ...adForm, image_url: publicUrl });
+      const result = await uploadApi.uploadImage(file, 'ads');
+      setAdForm({ ...adForm, image_url: result.url });
       toast({ title: "Image uploaded successfully" });
     } catch (error) {
       console.error('Upload error:', error);
@@ -151,35 +147,21 @@ const AdEditor = () => {
 
     setLoading(true);
     try {
+      const bannerData = {
+        title: bannerForm.title,
+        imageUrl: bannerForm.image_url,
+        linkUrl: bannerForm.link_url || null,
+        active: bannerForm.active,
+        displayOrder: bannerForm.display_order,
+      };
+
       if (bannerForm.id) {
         // Update existing banner
-        const { error } = await supabase
-          .from('banners')
-          .update({
-            title: bannerForm.title,
-            image_url: bannerForm.image_url,
-            link_url: bannerForm.link_url || null,
-            active: bannerForm.active,
-            display_order: bannerForm.display_order,
-          })
-          .eq('id', bannerForm.id);
-
-        if (error) throw error;
+        await api.put(`/admin/banners/${bannerForm.id}`, bannerData);
         toast({ title: "Banner updated successfully" });
       } else {
         // Create new banner
-        const { error } = await supabase
-          .from('banners')
-          .insert({
-            title: bannerForm.title,
-            image_url: bannerForm.image_url,
-            link_url: bannerForm.link_url || null,
-            active: bannerForm.active,
-            display_order: bannerForm.display_order,
-            created_by: user?.id,
-          });
-
-        if (error) throw error;
+        await api.post('/admin/banners', bannerData);
         toast({ title: "Banner created successfully" });
       }
 
@@ -209,39 +191,23 @@ const AdEditor = () => {
 
     setLoading(true);
     try {
+      const adData = {
+        title: adForm.title,
+        description: adForm.description || null,
+        imageUrl: adForm.image_url || null,
+        videoUrl: adForm.video_url || null,
+        linkUrl: adForm.link_url || null,
+        displayDuration: adForm.display_duration,
+        active: adForm.active,
+      };
+
       if (adForm.id) {
         // Update existing ad
-        const { error } = await supabase
-          .from('ads')
-          .update({
-            title: adForm.title,
-            description: adForm.description || null,
-            image_url: adForm.image_url || null,
-            video_url: adForm.video_url || null,
-            link_url: adForm.link_url || null,
-            display_duration: adForm.display_duration,
-            active: adForm.active,
-          })
-          .eq('id', adForm.id);
-
-        if (error) throw error;
+        await api.put(`/admin/ads/${adForm.id}`, adData);
         toast({ title: "Ad updated successfully" });
       } else {
         // Create new ad
-        const { error } = await supabase
-          .from('ads')
-          .insert({
-            title: adForm.title,
-            description: adForm.description || null,
-            image_url: adForm.image_url || null,
-            video_url: adForm.video_url || null,
-            link_url: adForm.link_url || null,
-            display_duration: adForm.display_duration,
-            active: adForm.active,
-            created_by: user?.id,
-          });
-
-        if (error) throw error;
+        await api.post('/admin/ads', adData);
         toast({ title: "Ad created successfully" });
       }
 
@@ -270,9 +236,8 @@ const AdEditor = () => {
 
     setLoading(true);
     try {
-      const { error } = await supabase.from('banners').delete().eq('id', id);
-      if (error) throw error;
-      
+      await api.delete(`/admin/banners/${id}`);
+
       toast({ title: "Banner deleted successfully" });
       fetchBanners();
     } catch (error) {
@@ -288,9 +253,8 @@ const AdEditor = () => {
 
     setLoading(true);
     try {
-      const { error } = await supabase.from('ads').delete().eq('id', id);
-      if (error) throw error;
-      
+      await api.delete(`/admin/ads/${id}`);
+
       toast({ title: "Ad deleted successfully" });
       fetchAds();
     } catch (error) {

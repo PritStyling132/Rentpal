@@ -7,7 +7,7 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { supabase } from '@/integrations/supabase/client';
+import api from '@/lib/api';
 import { Loader2 } from 'lucide-react';
 
 interface TermsDialogProps {
@@ -23,16 +23,9 @@ export const TermsDialog = ({ children, open, onOpenChange }: TermsDialogProps) 
   useEffect(() => {
     const fetchTerms = async () => {
       try {
-        const { data, error } = await supabase
-          .from('terms_and_conditions')
-          .select('content')
-          .eq('active', true)
-          .order('version', { ascending: false })
-          .limit(1)
-          .single();
-
-        if (error) throw error;
-        setTerms(data.content);
+        const response = await api.get('/admin/terms');
+        const data = response.data;
+        setTerms(data?.content || 'No terms and conditions available.');
       } catch (error) {
         console.error('Error fetching terms:', error);
         setTerms('Unable to load terms and conditions. Please try again later.');

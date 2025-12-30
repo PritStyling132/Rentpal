@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
-import { supabase } from '@/integrations/supabase/client';
+import api from '@/lib/api';
 import { X, ExternalLink, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -22,7 +22,7 @@ export const AdPopup = () => {
 
   useEffect(() => {
     const hasSeenAd = sessionStorage.getItem('hasSeenAd');
-    
+
     if (!hasSeenAd) {
       fetchRandomAd();
     }
@@ -42,15 +42,24 @@ export const AdPopup = () => {
 
   const fetchRandomAd = async () => {
     try {
-      const { data } = await supabase
-        .from('ads')
-        .select('*')
-        .eq('active', true);
+      const response = await api.get('/admin/ads/active');
+      const data = response.data || [];
 
-      if (data && data.length > 0) {
+      if (data.length > 0) {
         const randomAd = data[Math.floor(Math.random() * data.length)];
-        setCurrentAd(randomAd);
-        setTimeLeft(randomAd.display_duration);
+        // Transform camelCase to snake_case for component compatibility
+        const transformedAd: Ad = {
+          id: randomAd.id,
+          title: randomAd.title,
+          description: randomAd.description,
+          image_url: randomAd.imageUrl,
+          video_url: randomAd.videoUrl,
+          link_url: randomAd.linkUrl,
+          display_duration: randomAd.displayDuration || 10,
+          active: randomAd.active,
+        };
+        setCurrentAd(transformedAd);
+        setTimeLeft(transformedAd.display_duration);
         setOpen(true);
       }
     } catch (error) {
@@ -79,7 +88,7 @@ export const AdPopup = () => {
           animation: 'fadeIn 0.5s ease-out'
         }}>
           {/* Animated background accent */}
-          <div 
+          <div
             className="absolute inset-0 opacity-20"
             style={{
               background: 'radial-gradient(circle at 20% 50%, #E5383B 0%, transparent 50%), radial-gradient(circle at 80% 50%, #BA181B 0%, transparent 50%)',
@@ -109,10 +118,10 @@ export const AdPopup = () => {
           >
             <X className="w-5 h-5 text-[#F5F3F4]" />
           </Button>
-          
+
           {/* Stylish timer badge */}
           {timeLeft > 0 && (
-            <div 
+            <div
               className="absolute top-4 left-4 z-20 rounded-full px-4 py-2 font-bold text-sm shadow-lg"
               style={{
                 background: 'linear-gradient(135deg, #A4161A, #BA181B)',
@@ -132,7 +141,7 @@ export const AdPopup = () => {
           {/* Main content container */}
           <div className="relative z-10">
             {/* Media section with gradient overlay */}
-            <div 
+            <div
               className={`relative group ${currentAd.link_url ? 'cursor-pointer' : ''} overflow-hidden`}
               onClick={handleAdClick}
             >
@@ -144,7 +153,7 @@ export const AdPopup = () => {
                     allowFullScreen
                     allow="autoplay; encrypted-media"
                   />
-                  <div 
+                  <div
                     className="absolute inset-0 bg-gradient-to-t from-[#0B090A] via-transparent to-transparent opacity-60 pointer-events-none"
                   />
                 </div>
@@ -155,12 +164,12 @@ export const AdPopup = () => {
                     alt={currentAd.title}
                     className="w-full h-auto max-h-[60vh] object-cover transition-transform duration-500 group-hover:scale-105"
                   />
-                  <div 
+                  <div
                     className="absolute inset-0 bg-gradient-to-t from-[#0B090A] via-transparent to-transparent opacity-70"
                   />
                 </div>
               ) : (
-                <div 
+                <div
                   className="w-full h-64 flex items-center justify-center"
                   style={{
                     background: 'linear-gradient(135deg, #660708, #A4161A)'
@@ -177,7 +186,7 @@ export const AdPopup = () => {
             </div>
 
             {/* Content section with premium styling */}
-            <div 
+            <div
               className="p-8 relative"
               style={{
                 background: 'linear-gradient(to bottom, rgba(11, 9, 10, 0.95), rgba(22, 26, 29, 0.98))',
@@ -185,14 +194,14 @@ export const AdPopup = () => {
               }}
             >
               {/* Decorative top border */}
-              <div 
+              <div
                 className="absolute top-0 left-0 right-0 h-1"
                 style={{
                   background: 'linear-gradient(90deg, transparent, #E5383B, #BA181B, #A4161A, transparent)'
                 }}
               />
 
-              <h3 
+              <h3
                 className="text-3xl font-bold mb-3 tracking-tight"
                 style={{
                   background: 'linear-gradient(135deg, #F5F3F4, #D3D3D3)',
@@ -203,18 +212,18 @@ export const AdPopup = () => {
               >
                 {currentAd.title}
               </h3>
-              
+
               {currentAd.description && (
-                <p 
+                <p
                   className="text-base leading-relaxed mb-6"
                   style={{ color: '#B1A7A6' }}
                 >
                   {currentAd.description}
                 </p>
               )}
-              
+
               {currentAd.link_url && (
-                <Button 
+                <Button
                   className="w-full py-6 text-lg font-semibold rounded-xl transition-all duration-300 hover:scale-[1.02] active:scale-[0.98] group overflow-hidden relative"
                   style={{
                     background: 'linear-gradient(135deg, #A4161A, #BA181B, #E5383B)',
@@ -228,7 +237,7 @@ export const AdPopup = () => {
                     Learn More
                     <ExternalLink className="w-5 h-5 transition-transform duration-300 group-hover:translate-x-1 group-hover:-translate-y-1" />
                   </span>
-                  <div 
+                  <div
                     className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300"
                     style={{
                       background: 'linear-gradient(135deg, #BA181B, #E5383B)'

@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/integrations/supabase/client';
+import { usersApi, uploadApi } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import { Edit, Upload } from 'lucide-react';
 
@@ -14,20 +14,20 @@ interface ProfileEditDialogProps {
 }
 
 export const ProfileEditDialog = ({ open: controlledOpen, onOpenChange }: ProfileEditDialogProps = {}) => {
-  const { user } = useAuth();
+  const { user, profile, refreshProfile } = useAuth();
   const { toast } = useToast();
   const [internalOpen, setInternalOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
-  
+
   const open = controlledOpen !== undefined ? controlledOpen : internalOpen;
   const setOpen = onOpenChange || setInternalOpen;
-  
+
   const [formData, setFormData] = useState({
     name: '',
     email: '',
     phone: '',
-    avatar_url: ''
+    avatarUrl: ''
   });
 
   useEffect(() => {
@@ -38,20 +38,27 @@ export const ProfileEditDialog = ({ open: controlledOpen, onOpenChange }: Profil
 
   const loadProfile = async () => {
     if (!user) return;
-    
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('name, phone, pin_code, avatar_url')
-      .eq('id', user.id)
-      .single();
 
-    if (data) {
+    // Use profile from context if available, otherwise fetch
+    if (profile) {
       setFormData({
-        name: data.name || '',
+        name: profile.name || '',
         email: user.email || '',
-        phone: data.phone || '',
-        avatar_url: data.avatar_url || ''
+        phone: profile.phone || '',
+        avatarUrl: profile.avatarUrl || ''
       });
+    } else {
+      try {
+        const data = await usersApi.getMe();
+        setFormData({
+          name: data.name || '',
+          email: user.email || '',
+          phone: data.phone || '',
+          avatarUrl: data.avatarUrl || ''
+        });
+      } catch (error) {
+        console.error('Error loading profile:', error);
+      }
     }
   };
 
@@ -61,22 +68,10 @@ export const ProfileEditDialog = ({ open: controlledOpen, onOpenChange }: Profil
 
     setUploading(true);
     try {
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${user.id}-${Date.now()}.${fileExt}`;
-      const filePath = `avatars/${fileName}`;
+      const result = await uploadApi.uploadAvatar(file);
 
-      const { error: uploadError } = await supabase.storage
-        .from('listing-images')
-        .upload(filePath, file);
+      setFormData(prev => ({ ...prev, avatarUrl: result.url }));
 
-      if (uploadError) throw uploadError;
-
-      const { data: { publicUrl } } = supabase.storage
-        .from('listing-images')
-        .getPublicUrl(filePath);
-
-      setFormData(prev => ({ ...prev, avatar_url: publicUrl }));
-      
       toast({
         title: "Image uploaded",
         description: "Profile image uploaded successfully",
@@ -84,7 +79,7 @@ export const ProfileEditDialog = ({ open: controlledOpen, onOpenChange }: Profil
     } catch (error: any) {
       toast({
         title: "Upload failed",
-        description: error.message,
+        description: error.message || 'Failed to upload image',
         variant: "destructive",
       });
     } finally {
@@ -98,33 +93,28 @@ export const ProfileEditDialog = ({ open: controlledOpen, onOpenChange }: Profil
 
     setLoading(true);
     try {
-      const updateData: any = {
+      await usersApi.updateProfile({
         name: formData.name,
         phone: formData.phone,
-      };
-      
-      if (formData.avatar_url) {
-        updateData.avatar_url = formData.avatar_url;
-      }
-
-      const { error } = await supabase
-        .from('profiles')
-        .update(updateData)
-        .eq('id', user.id);
-
-      if (error) throw error;
+        avatarUrl: formData.avatarUrl || undefined,
+      });
 
       toast({
         title: "Profile updated",
         description: "Your profile has been updated successfully",
       });
-      
+
       setOpen(false);
-      window.location.reload();
+      // Refresh profile in context instead of page reload
+      if (refreshProfile) {
+        await refreshProfile();
+      } else {
+        window.location.reload();
+      }
     } catch (error: any) {
       toast({
         title: "Update failed",
-        description: error.message,
+        description: error.message || 'Failed to update profile',
         variant: "destructive",
       });
     } finally {
@@ -177,10 +167,10 @@ export const ProfileEditDialog = ({ open: controlledOpen, onOpenChange }: Profil
           <div className="space-y-2">
             <Label htmlFor="avatar">Profile Image</Label>
             <div className="flex items-center gap-4">
-              {formData.avatar_url && (
-                <img 
-                  src={formData.avatar_url} 
-                  alt="Profile preview" 
+              {formData.avatarUrl && (
+                <img
+                  src={formData.avatarUrl}
+                  alt="Profile preview"
                   className="w-16 h-16 rounded-full object-cover border-2 border-border"
                 />
               )}

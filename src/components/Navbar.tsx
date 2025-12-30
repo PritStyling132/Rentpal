@@ -4,13 +4,13 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/contexts/AuthContext';
 import { useUnreadCount } from '@/hooks/useUnreadCount';
-import { Menu, X, User, LogOut, LayoutDashboard, MessageCircle } from 'lucide-react';
+import { Menu, X, User, LogOut, LayoutDashboard, MessageCircle, Building2, Package } from 'lucide-react';
 import heroImage from '@/assets/logo-remove.png';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { useIsMobile } from '@/hooks/use-mobile';
 
 export const Navbar = () => {
-  const { user, logout, isAdmin } = useAuth();
+  const { user, logout, isAdmin, isOwner, userType } = useAuth();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const [open, setOpen] = useState(false);
@@ -24,9 +24,6 @@ export const Navbar = () => {
 
   const NavLinks = () => (
     <>
-
-
-
       <Link to="/listings" onClick={() => setOpen(false)}>
         <Button variant="ghost" className="font-medium w-full justify-start text-[#161A1D] hover:text-[#E5383B] hover:bg-[#E5383B]/5 transition-all duration-200">
           Browse Items
@@ -46,25 +43,33 @@ export const Navbar = () => {
         </Button>
       </Link>
 
-
-
-
       <Link to="/leaderboard" onClick={() => setOpen(false)}>
         <Button variant="ghost" className="font-medium w-full justify-start text-[#161A1D] hover:text-[#E5383B] hover:bg-[#E5383B]/5 transition-all duration-200">
-          🏆 Leaderboard
+          Leaderboard
         </Button>
       </Link>
 
       {user ? (
         <>
+          {/* Owner-specific links */}
+          {isOwner && (
+            <Link to="/owner-dashboard" onClick={() => setOpen(false)}>
+              <Button variant="ghost" className="w-full justify-start text-[#E5383B] hover:text-[#BA181B] hover:bg-[#E5383B]/5 transition-all duration-200">
+                <Building2 className="w-5 h-5 mr-2" /> Owner Dashboard
+              </Button>
+            </Link>
+          )}
+
           <Link to="/submit-listing" onClick={() => setOpen(false)}>
             <Button
               variant="outline"
               className="font-medium w-full justify-start border-2 border-[#E5383B] text-[#660708] hover:bg-[#E5383B] hover:text-[#F5F3F4] transition-all duration-300 hover:shadow-lg hover:shadow-[#E5383B]/20"
             >
+              <Package className="w-5 h-5 mr-2" />
               List an Item
             </Button>
           </Link>
+
           <Link to="/inbox" onClick={() => setOpen(false)}>
             <Button variant="ghost" className="w-full justify-start text-[#161A1D] hover:text-[#E5383B] hover:bg-[#E5383B]/5 transition-all duration-200 relative">
               <MessageCircle className={`w-5 h-5 mr-2 ${unreadCount > 0 ? 'animate-pulse' : ''}`} /> Inbox
@@ -75,6 +80,7 @@ export const Navbar = () => {
               )}
             </Button>
           </Link>
+
           <Link to="/profile" onClick={() => setOpen(false)}>
             <Button variant="ghost" className="w-full justify-start text-[#161A1D] hover:text-[#E5383B] hover:bg-[#E5383B]/5 transition-all duration-200">
               <User className="w-5 h-5 mr-2" /> Profile
@@ -161,7 +167,7 @@ export const Navbar = () => {
 
               <Link to="/leaderboard" className="relative group px-4 py-2">
                 <span className="text-[#161A1D] group-hover:text-[#E5383B] font-medium transition-colors duration-200">
-                  🏆 Leaderboard
+                  Leaderboard
                 </span>
                 <span className="absolute bottom-0 left-0 w-0 h-0.5 bg-gradient-to-r from-[#E5383B] to-[#BA181B] group-hover:w-full transition-all duration-300"></span>
               </Link>
@@ -170,6 +176,19 @@ export const Navbar = () => {
 
               {user ? (
                 <>
+                  {/* Owner Dashboard Link */}
+                  {isOwner && (
+                    <Link to="/owner-dashboard">
+                      <Button
+                        variant="ghost"
+                        className="gap-2 text-[#E5383B] hover:text-[#BA181B] hover:bg-[#E5383B]/10 transition-all duration-200"
+                      >
+                        <Building2 className="w-5 h-5" />
+                        <span className="font-medium">Dashboard</span>
+                      </Button>
+                    </Link>
+                  )}
+
                   <Link to="/submit-listing">
                     <Button
                       variant="outline"
@@ -263,6 +282,20 @@ export const Navbar = () => {
               </SheetTrigger>
               <SheetContent side="right" className="w-[300px] bg-gradient-to-b from-[#F5F3F4] to-[#F5F3F4]/95 border-l-2 border-[#E5383B]/20">
                 <div className="flex flex-col gap-3 mt-8">
+                  {/* User Type Badge */}
+                  {user && (
+                    <div className="mb-4 px-4">
+                      <Badge
+                        className={`${
+                          isOwner
+                            ? 'bg-[#E5383B]/10 text-[#E5383B] border-[#E5383B]/30'
+                            : 'bg-blue-500/10 text-blue-500 border-blue-500/30'
+                        } border`}
+                      >
+                        {isOwner ? 'Owner Account' : 'User Account'}
+                      </Badge>
+                    </div>
+                  )}
                   <NavLinks />
                 </div>
               </SheetContent>

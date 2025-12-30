@@ -1,20 +1,20 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { adminApi } from '@/lib/api';
 
 export interface Coupon {
   id: string;
   code: string;
-  discount_percentage: number;
-  discount_amount: number;
-  is_percentage: boolean;
-  active: boolean;
-  usage_limit: number | null;
-  used_count: number;
-  valid_from: string;
-  valid_until: string | null;
-  created_by: string;
-  created_at: string;
-  updated_at: string;
+  discountType: 'percentage' | 'fixed';
+  discountValue: number;
+  minPurchase?: number | null;
+  maxDiscount?: number | null;
+  usageLimit?: number | null;
+  usedCount: number;
+  validFrom?: string | null;
+  validUntil?: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export const useCoupons = () => {
@@ -24,13 +24,10 @@ export const useCoupons = () => {
   const fetchCoupons = async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('coupons')
-        .select('*')
-        .order('created_at', { ascending: false });
-      
-      if (error) throw error;
-      setCoupons(data || []);
+      const response = await adminApi.getCoupons();
+      if (response.data.success) {
+        setCoupons(response.data.data || []);
+      }
     } catch (error) {
       console.error('Error fetching coupons:', error);
     } finally {
@@ -45,28 +42,32 @@ export const useCoupons = () => {
   return { coupons, loading, refetch: fetchCoupons };
 };
 
-export const validateCoupon = async (code: string): Promise<{
+export const validateCoupon = async (
+  code: string
+): Promise<{
   valid: boolean;
   coupon?: Coupon;
   error?: string;
 }> => {
   try {
-    const { data, error } = await supabase
-      .from('coupons')
-      .select('*')
-      .eq('code', code.toUpperCase())
-      .eq('active', true)
-      .single();
+    const response = await adminApi.getCoupons();
+    if (!response.data.success) {
+      return { valid: false, error: 'Error fetching coupons' };
+    }
 
-    if (error || !data) {
+    const coupon = (response.data.data as Coupon[]).find(
+      (c) => c.code.toUpperCase() === code.toUpperCase() && c.isActive
+    );
+
+    if (!coupon) {
       return { valid: false, error: 'Invalid coupon code' };
     }
 
     const now = new Date();
-    const validFrom = new Date(data.valid_from);
-    const validUntil = data.valid_until ? new Date(data.valid_until) : null;
+    const validFrom = coupon.validFrom ? new Date(coupon.validFrom) : null;
+    const validUntil = coupon.validUntil ? new Date(coupon.validUntil) : null;
 
-    if (now < validFrom) {
+    if (validFrom && now < validFrom) {
       return { valid: false, error: 'Coupon not yet valid' };
     }
 
@@ -74,11 +75,11 @@ export const validateCoupon = async (code: string): Promise<{
       return { valid: false, error: 'Coupon has expired' };
     }
 
-    if (data.usage_limit && data.used_count >= data.usage_limit) {
+    if (coupon.usageLimit && coupon.usedCount >= coupon.usageLimit) {
       return { valid: false, error: 'Coupon usage limit reached' };
     }
 
-    return { valid: true, coupon: data };
+    return { valid: true, coupon };
   } catch (error) {
     return { valid: false, error: 'Error validating coupon' };
   }
@@ -86,58 +87,40 @@ export const validateCoupon = async (code: string): Promise<{
 
 export const createCoupon = async (couponData: {
   code: string;
-  discount_percentage?: number;
-  discount_amount?: number;
-  is_percentage: boolean;
-  usage_limit?: number;
-  valid_from: string;
-  valid_until?: string;
+  discountType: 'percentage' | 'fixed';
+  discountValue: number;
+  minPurchase?: number;
+  maxDiscount?: number;
+  usageLimit?: number;
+  validFrom?: string;
+  validUntil?: string;
+  isActive?: boolean;
 }) => {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return false;
-
-  const insertData: any = {
-    code: couponData.code.toUpperCase(),
-    is_percentage: couponData.is_percentage,
-    created_by: user.id,
-    valid_from: couponData.valid_from,
-  };
-
-  if (couponData.is_percentage && couponData.discount_percentage !== undefined) {
-    insertData.discount_percentage = couponData.discount_percentage;
-    insertData.discount_amount = 0;
-  } else if (!couponData.is_percentage && couponData.discount_amount !== undefined) {
-    insertData.discount_amount = couponData.discount_amount;
-    insertData.discount_percentage = 0;
+  try {
+    const response = await adminApi.createCoupon(couponData);
+    return response.data.success;
+  } catch (error) {
+    console.error('Error creating coupon:', error);
+    return false;
   }
-
-  if (couponData.usage_limit) {
-    insertData.usage_limit = couponData.usage_limit;
-  }
-
-  if (couponData.valid_until) {
-    insertData.valid_until = couponData.valid_until;
-  }
-
-  const { error } = await supabase.from('coupons').insert(insertData);
-
-  return !error;
 };
 
 export const updateCoupon = async (id: string, updates: Partial<Coupon>) => {
-  const { error } = await supabase
-    .from('coupons')
-    .update(updates)
-    .eq('id', id);
-
-  return !error;
+  try {
+    const response = await adminApi.updateCoupon(id, updates);
+    return response.data.success;
+  } catch (error) {
+    console.error('Error updating coupon:', error);
+    return false;
+  }
 };
 
 export const deleteCoupon = async (id: string) => {
-  const { error } = await supabase
-    .from('coupons')
-    .delete()
-    .eq('id', id);
-
-  return !error;
+  try {
+    const response = await adminApi.deleteCoupon(id);
+    return response.data.success;
+  } catch (error) {
+    console.error('Error deleting coupon:', error);
+    return false;
+  }
 };

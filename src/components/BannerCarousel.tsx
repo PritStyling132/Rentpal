@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { ChevronLeft, ChevronRight, ExternalLink } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
+import api from "@/lib/api";
 
 interface Banner {
   id: string;
@@ -18,18 +18,22 @@ export default function BannerCarousel() {
   const [isHovered, setIsHovered] = useState(false);
   const [direction, setDirection] = useState(0);
 
-  // Fetch banners from Supabase
+  // Fetch banners from API
   useEffect(() => {
     const fetchBanners = async () => {
       try {
-        const { data, error } = await supabase
-          .from('banners')
-          .select('*')
-          .eq('active', true)
-          .order('display_order', { ascending: true });
-
-        if (error) throw error;
-        setBanners(data || []);
+        const response = await api.get('/admin/banners/active');
+        const data = response.data || [];
+        // Transform camelCase to snake_case for component compatibility
+        const transformed = data.map((b: any) => ({
+          id: b.id,
+          title: b.title,
+          image_url: b.imageUrl,
+          link_url: b.linkUrl,
+          active: b.active,
+          display_order: b.displayOrder,
+        }));
+        setBanners(transformed);
       } catch (error) {
         console.error('Error fetching banners:', error);
       } finally {
@@ -38,29 +42,9 @@ export default function BannerCarousel() {
     };
 
     fetchBanners();
-
-    // Subscribe to realtime updates
-    const channel = supabase
-      .channel('banners-changes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'banners'
-        },
-        () => {
-          fetchBanners();
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
   }, []);
 
-  // 🌀 Auto-scroll effect
+  // Auto-scroll effect
   useEffect(() => {
     if (!isHovered && banners.length > 1) {
       const timer = setInterval(() => {
@@ -84,7 +68,7 @@ export default function BannerCarousel() {
     if (banner.link_url) window.open(banner.link_url, "_blank");
   };
 
-  // 🧱 Skeleton Loading State
+  // Skeleton Loading State
   if (loading) {
     return (
       <div className="w-full px-4 py-8">
